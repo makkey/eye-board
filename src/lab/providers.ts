@@ -153,7 +153,12 @@ const openai: Provider = {
 
 // ---- Sarashina（SB Intuitions。OpenAI 互換の形式。書かれていない引数を送ると 400 になる）----
 
-const SARASHINA = 'https://api.sarashina.ai/v1';
+/** ブラウザから直接は呼べない（CORS）ので、手元で動かす中継（tools/cors-proxy.mjs）を通す */
+let sarashinaBase = 'http://127.0.0.1:8787';
+export function setSarashinaRelay(url: string) {
+  sarashinaBase = url.trim().replace(/\/+$/, '') || 'http://127.0.0.1:8787';
+}
+const SARASHINA = () => `${sarashinaBase}/v1`;
 /** 一覧の API が使えない時に出すモデル */
 const SARASHINA_MODELS = ['sarashina3-mini', 'sarashina3-nano'];
 /** json_schema の出力指定が通らなかったモデル（以後は指示文で JSON を頼む） */
@@ -162,10 +167,10 @@ const noSchema = new Set<string>();
 const sarashina: Provider = {
   id: 'sarashina',
   label: 'Sarashina',
-  keyHelp: 'https://sarashina.ai/ に Google アカウントでログインして作成。無料ベータは1分あたりの回数制限が厳しいので「同時に送る数」は1に',
+  keyHelp: 'https://sarashina.ai/ に Google アカウントでログインして作成。無料ベータは1分あたりの回数制限が厳しいので「同時に送る数」は1に。下の中継が必要',
   async listModels(key) {
     try {
-      const res = await fetchJson(`${SARASHINA}/models`, { headers: { authorization: `Bearer ${key}` } });
+      const res = await fetchJson(`${SARASHINA()}/models`, { headers: { authorization: `Bearer ${key}` } });
       const ids = (res.data ?? []).map((m: { id: string }) => m.id).filter((id: string) => /sarashina/.test(id) && !/embed|rerank|guard|translate/.test(id));
       return ids.length ? ids : SARASHINA_MODELS;
     } catch {
@@ -178,7 +183,7 @@ const sarashina: Provider = {
   async generate(key, model, system, schema, user) {
     const call = (structured: boolean) =>
       sarashinaRateLimit(() =>
-        fetchJson(`${SARASHINA}/chat/completions`, {
+        fetchJson(`${SARASHINA()}/chat/completions`, {
           method: 'POST',
           headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
           body: JSON.stringify({
@@ -194,17 +199,27 @@ const sarashina: Provider = {
         }),
       );
     let res;
-    if (noSchema.has(model)) res = await call(false);
-    else {
+    try {
+      res = await callWithFallback();
+    } catch (e) {
+      if (/接続できませんでした/.test((e as Error).message)) {
+        throw new Error(`中継（${sarashinaBase}）に接続できませんでした。手元の PC で中継を起動しているか確認してください`);
+      }
+      throw e;
+    }
+    return res.choices?.[0]?.message?.content ?? '';
+
+    /** json_schema の出力指定が 400 になったモデルは、以後は指示文で JSON を頼む */
+    async function callWithFallback() {
+      if (noSchema.has(model)) return call(false);
       try {
-        res = await call(true);
+        return await call(true);
       } catch (e) {
         if (!/HTTP 400/.test((e as Error).message)) throw e;
         noSchema.add(model);
-        res = await call(false);
+        return call(false);
       }
     }
-    return res.choices?.[0]?.message?.content ?? '';
   },
 };
 
@@ -214,14 +229,15 @@ function jsonInstruction(schema: JsonSchema): string {
   return `次の形の JSON だけを返してください（説明やコードブロックは不要）：{"candidates": [{${fields}}]}`;
 }
 
-/** 無料ベータは1分あたりの回数が少ないので、429 なら（文面によらず）12秒ずつ待って最大1分ほどやり直す */
+/** 1分あたりの回数制限（429）なら、Retry-After の秒数（なければ12秒）待ってやり直す */
 async function sarashinaRateLimit<T>(f: () => Promise<T>): Promise<T> {
   for (let i = 0; ; i++) {
     try {
       return await f();
     } catch (e) {
       if (i >= 5 || !/HTTP 429/.test((e as Error).message)) throw e;
-      await new Promise((r) => setTimeout(r, 12000));
+      const sec = (e as HttpError).retryAfter ?? 12;
+      await new Promise((r) => setTimeout(r, Math.min(60, Math.max(1, sec)) * 1000));
     }
   }
 }
@@ -259,6 +275,11 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
   sarashina: withRetry(sarashina),
 };
 
+interface HttpError extends Error {
+  /** Retry-After ヘッダーの秒数 */
+  retryAfter?: number;
+}
+
 async function fetchJson(url: string, init: RequestInit) {
   let res: Response;
   try {
@@ -271,11 +292,15 @@ async function fetchJson(url: string, init: RequestInit) {
   if (!res.ok) {
     let message = body;
     try {
-      message = JSON.parse(body).error?.message ?? body;
+      const json = JSON.parse(body);
+      message = json.error?.message ?? json.message ?? body;
     } catch {
       // JSON でなければ本文をそのまま
     }
-    throw new Error(`HTTP ${res.status}: ${message.split('\n')[0].slice(0, 200)}`);
+    const err: HttpError = new Error(`HTTP ${res.status}: ${String(message).split('\n')[0].slice(0, 200)}`);
+    const retryAfter = Number(res.headers.get('retry-after'));
+    if (retryAfter > 0) err.retryAfter = retryAfter;
+    throw err;
   }
   return JSON.parse(body);
 }

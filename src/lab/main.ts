@@ -3,7 +3,7 @@ import './lab.css';
 import { DEFAULT_SENTENCES, parseSentences } from './dataset';
 import { PROMPTS, TOP_N, judge, segmentPrompt, sentencePrompt } from './decode';
 import type { Candidate, PromptId, PromptVersion } from './decode';
-import { PROVIDERS } from './providers';
+import { PROVIDERS, setSarashinaRelay } from './providers';
 import type { Effort, ProviderId } from './providers';
 import { toVowels } from './vowels';
 
@@ -57,6 +57,7 @@ function loadProvider() {
   keyInput.value = store.get(`key.${providerId}`) ?? '';
   $('key-help').textContent = `（${p.keyHelp}）`;
   $('effort-field').hidden = providerId !== 'claude';
+  $('relay-field').hidden = providerId !== 'sarashina';
   const models = JSON.parse(store.get(`models.${providerId}`) ?? '[]') as string[];
   fillModels(models, store.get(`model.${providerId}`));
 }
@@ -77,6 +78,14 @@ function fillModels(models: string[], selected: string | null) {
   }
   modelSelect.value = selected && models.includes(selected) ? selected : PROVIDERS[providerId].pickDefault(models);
 }
+
+const relayInput = $<HTMLInputElement>('relay');
+relayInput.value = store.get('relay.sarashina') ?? '';
+setSarashinaRelay(relayInput.value);
+relayInput.onchange = () => {
+  store.set('relay.sarashina', relayInput.value.trim() || null);
+  setSarashinaRelay(relayInput.value);
+};
 
 keyInput.onchange = () => {
   if ($<HTMLInputElement>('save-key').checked) store.set(`key.${providerId}`, keyInput.value.trim());
