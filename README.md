@@ -50,6 +50,15 @@
 
 カメラなしでも、キーボードで流れを試せます（`Q W E / A D` または矢印キーで方向、`Space`・`X`・`↓` で目を閉じる）。
 
+## 母音入力ラボ（実験）
+
+`lab.html`（公開先では https://makkey.github.io/eye-board/lab.html ）は、日本語を**母音だけ＋文節の区切りの空白**で入力し（例：「昨日は 楽しかったね ありがとう」→「いおうあ あおいあっあえ あいあおう」）、LLM に元の文を推測させる方式の実験ページです。
+
+- Claude / Gemini / ChatGPT を切り替え、API から取得したモデル一覧で比較できる
+- API キーはブラウザの中だけに保存され、各社の API に直接送られる
+- 例文（`src/lab/dataset.ts`、編集可）を「文単位」または「文節ごと（前の文節は確定済みとして次を推測）」で推測させ、正解が1位・5位以内に入った割合、母音が入力と合う候補の割合、時間を集計する
+- 結果はテキストでコピーできる
+
 ## 仕組み
 
 - [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) で顔のランドマークと blendshape を取得（すべて端末内で処理）
@@ -68,6 +77,7 @@
 | `src/layout.ts` | 言語ごとのキー配置 |
 | `src/kana.ts` / `src/english.ts` | 濁点・小文字などの変換、英語の自動大文字 |
 | `src/main.ts` | UI |
+| `src/lab/` | 母音入力ラボ（母音への変換、LLM への指示と採点、各社 API の呼び出し） |
 
 ## 開発
 
