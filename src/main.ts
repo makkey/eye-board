@@ -229,8 +229,8 @@ function updateView(t: number) {
     } else {
       fill = dur / settings.closeMinMs;
     }
-  } else if (engine.holdStart !== null) {
-    const held = t - engine.holdStart;
+  } else if (engine.dir !== 'C') {
+    const held = engine.held;
     if (engine.stage === 'row' && LONG_ROW_BY_DIR[engine.dir]) {
       fill = held / settings.longMs;
       marker = settings.selectMs / settings.longMs;

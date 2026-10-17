@@ -7,7 +7,9 @@ import type { Dir } from './types';
 /** 方向の列（[dir, ms] や ['closed', ms]）を 10ms 刻みで流し、確定した項目を返す */
 function run(steps: [Dir | 'closed', number][], settings = DEFAULT_SETTINGS) {
   const log: string[] = [];
+  const rows: string[] = [];
   const engine = new InputEngine(settings, {
+    rowCommit: (row) => rows.push(row.id),
     commit: (item) => log.push(itemLabel(item)),
     cancel: (reason) => log.push(`cancel:${reason}`),
   });
@@ -23,7 +25,7 @@ function run(steps: [Dir | 'closed', number][], settings = DEFAULT_SETTINGS) {
       t += 10;
     }
   }
-  return { log, engine };
+  return { log, rows, engine };
 }
 
 describe('InputEngine', () => {
@@ -81,6 +83,40 @@ describe('InputEngine', () => {
       ['C', 300],
     ]);
     expect(log).toEqual([]);
+    expect(engine.stage).toBe('row');
+  });
+
+  it('閉じ始めのまぶたが一瞬「左下」と判定されても、閉じ続ければ な行', () => {
+    const { rows } = run([
+      ['C', 300],
+      ['DL', 150],
+      ['closed', 900],
+      ['C', 300],
+    ]);
+    expect(rows).toEqual(['na']);
+  });
+
+  it('閉じている途中に薄目で一瞬開いても途切れず、ま行にもならない', () => {
+    const { rows } = run([
+      ['C', 300],
+      ['DL', 150],
+      ['closed', 400],
+      ['DL', 50],
+      ['closed', 400],
+      ['C', 300],
+    ]);
+    expect(rows).toEqual(['na']);
+  });
+
+  it('目を閉じている時間は、方向を見ている時間に数えない', () => {
+    const { rows, engine } = run([
+      ['C', 300],
+      ['DL', 250],
+      ['closed', 400],
+      ['DL', 150],
+      ['C', 300],
+    ]);
+    expect(rows).toEqual([]);
     expect(engine.stage).toBe('row');
   });
 
@@ -178,7 +214,7 @@ describe('InputEngine', () => {
       ['C', 300],
       ['U', 300],
       ['closed', 150],
-      ['U', 300],
+      ['U', 400],
       ['C', 300],
       ['UL', 600],
       ['C', 300],

@@ -46,15 +46,21 @@ export class InputEngine {
 
   /** デバウンス後の安定した方向 */
   dir: Dir = 'C';
-  /** 現在の方向を見始めた時刻（中央なら null） */
-  holdStart: number | null = null;
-  /** 目を閉じ始めた時刻 */
+  /** 現在の方向を見ている時間（目を閉じている間は数えない） */
+  held = 0;
+  /** 目を閉じ始めた時刻（デバウンス後に確定、開始時刻は遡る） */
   closedStart: number | null = null;
   closeLevel: 0 | 1 | 2 = 0;
 
   private pendingDir: Dir = 'C';
   private pendingSince = 0;
   private lastActivity = 0;
+  private lastT: number | null = null;
+  /** フレームごとの「閉じている」判定と、その状態が続いている始まり */
+  private rawClosed = false;
+  private rawClosedSince = 0;
+  /** デバウンス後の「閉じている」 */
+  private closedStable = false;
 
   constructor(
     private settings: Settings,
@@ -68,47 +74,73 @@ export class InputEngine {
     this.dir = 'C';
     this.pendingDir = 'C';
     this.pendingSince = t;
-    this.holdStart = null;
+    this.held = 0;
     this.closedStart = null;
     this.closeLevel = 0;
     this.lastActivity = t;
+    this.lastT = null;
+    this.rawClosed = false;
+    this.closedStable = false;
   }
 
   update(frame: GazeFrame) {
     const { t } = frame;
+    // 方向を見ている時間はフレーム間隔の積み上げで測る（止まっている間は増えない）
+    const dt = this.lastT === null ? 0 : Math.min(t - this.lastT, 100);
+    this.lastT = t;
+
     if (!frame.faceFound) {
       // 顔を見失った間の「目を閉じた」は数えない
+      this.rawClosed = false;
+      this.closedStable = false;
       this.closedStart = null;
       this.closeLevel = 0;
       this.lastActivity = t;
       return;
     }
 
-    if (frame.closed) {
-      this.updateClosed(t);
+    // 「閉じる／開く」にもデバウンスをかける（薄目などで1〜2フレームだけ開いた判定になっても途切れない）
+    if (frame.closed !== this.rawClosed) {
+      this.rawClosed = frame.closed;
+      this.rawClosedSince = t;
+    }
+    if (this.rawClosed !== this.closedStable && t - this.rawClosedSince >= this.settings.debounceMs) {
+      this.closedStable = this.rawClosed;
+      if (this.closedStable) {
+        this.closedStart = this.rawClosedSince;
+        this.closeLevel = 0;
+      } else {
+        this.onOpen(t);
+      }
+    }
+
+    if (this.closedStable) {
+      if (this.rawClosed) this.updateClosed(t);
       return; // 閉じている間は方向を凍結する
     }
-    if (this.closedStart !== null) this.onOpen(t);
+    // まばたきの途中かもしれない間は、方向も時間も進めない
+    if (this.rawClosed) return;
 
     this.updateDir(frame.dir, t);
-    this.updateHold(t);
+    this.updateHold(dt);
     this.updateIdle(t);
   }
 
   /** 目を閉じた操作が今受け付けられるか（方向の候補を保持中は無効） */
   private closeActionAvailable(): boolean {
-    return this.dir === 'C' && this.candidate === null;
+    return this.candidate === null;
   }
 
   private updateClosed(t: number) {
-    if (this.closedStart === null) {
-      this.closedStart = t;
-      this.closeLevel = 0;
-    }
-    if (!this.closeActionAvailable()) return;
+    if (this.closedStart === null || !this.closeActionAvailable()) return;
     const dur = t - this.closedStart;
     if (this.closeLevel < 1 && dur >= this.settings.closeMinMs) {
       this.closeLevel = 1;
+      // 閉じる途中のまぶたは「下を見ている」と判定されやすい。意図して閉じたと分かった時点で、
+      // その方向は取り消して中央に戻す
+      this.dir = 'C';
+      this.pendingDir = 'C';
+      this.held = 0;
       this.events.closeTick?.(1);
     }
     // 2段目では長さに関係なく「戻る」なので、休む段階は1段目だけ
@@ -124,6 +156,7 @@ export class InputEngine {
     this.closeLevel = 0;
     this.lastActivity = t;
     // 開いた直後の視線は不安定なので、方向のデバウンスをやり直す
+    this.pendingDir = this.dir;
     this.pendingSince = t;
 
     if (level !== 1) return;
@@ -146,19 +179,19 @@ export class InputEngine {
     this.lastActivity = t;
     this.events.dirChange?.(next);
 
+    // 別の方向へ移った：候補を捨ててその方向で計り直す
+    this.held = 0;
     if (next === 'C') {
-      this.holdStart = null;
       if (this.candidate) this.commitCandidate(t);
       return;
     }
-    // 別の方向へ移った：候補を捨ててその方向で計り直す
-    this.holdStart = t;
     this.candidate = null;
   }
 
-  private updateHold(t: number) {
-    if (this.dir === 'C' || this.holdStart === null) return;
-    const held = t - this.holdStart;
+  private updateHold(dt: number) {
+    if (this.dir === 'C') return;
+    this.held += dt;
+    const held = this.held;
     const s = this.settings;
 
     if (this.stage === 'row') {
