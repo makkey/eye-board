@@ -57,7 +57,7 @@ function loadProvider() {
   const p = PROVIDERS[providerId];
   keyInput.value = store.get(`key.${providerId}`) ?? '';
   $('key-help').textContent = `（${p.keyHelp}）`;
-  $('effort-field').hidden = providerId !== 'claude' && providerId !== 'gemini';
+  $('effort-field').hidden = providerId === 'sarashina';
   $('relay-field').hidden = providerId !== 'sarashina';
   const models = JSON.parse(store.get(`models.${providerId}`) ?? '[]') as string[];
   fillModels(models, store.get(`model.${providerId}`));
@@ -466,12 +466,17 @@ function summarize(t: Target, mode: string, rs: TaskResult[]): Summary {
   const receivedValid = ok.reduce((a, r) => a + r.receivedValid, 0);
   let modeLabel = mode === 'sentence' ? '文単位' : '文節ごと';
   if (mode === 'segment') {
-    // 文の全文節が1位で当たった割合（実際の使い心地に近い）。エラーを含む文は数えない
-    const bySentence = new Map<number, boolean>();
-    for (const r of rs) bySentence.set(r.sentence, (bySentence.get(r.sentence) ?? true) && !!r.candidates[0]?.correct);
+    // 1文の全文節が当たった割合（実際の使い心地に近い）。エラーを含む文は数えない
     const withError = new Set(rs.filter((r) => r.error).map((r) => r.sentence));
-    const all = [...bySentence].filter(([i]) => !withError.has(i)).map(([, v]) => v);
-    modeLabel += `（文ごと全部1位 ${pct(all.filter(Boolean).length, all.length)}）`;
+    const sentenceRate = (hit: (r: TaskResult) => boolean) => {
+      const bySentence = new Map<number, boolean>();
+      for (const r of rs) bySentence.set(r.sentence, (bySentence.get(r.sentence) ?? true) && hit(r));
+      const all = [...bySentence].filter(([i]) => !withError.has(i)).map(([, v]) => v);
+      return pct(all.filter(Boolean).length, all.length);
+    };
+    const allTop1 = sentenceRate((r) => !!r.candidates[0]?.correct);
+    const allTop5 = sentenceRate((r) => r.candidates.some((c) => c.correct));
+    modeLabel += `（1文の全文節が 1位 ${allTop1}・5位以内 ${allTop5}）`;
   }
   if (t.runs > 1) {
     // 同じ実行の中で、合算しなかった場合（1回目の返答だけ）の成績も出す
@@ -480,7 +485,7 @@ function summarize(t: Target, mode: string, rs: TaskResult[]): Summary {
     const top5 = ok.filter((r) => r.single?.some((c) => c.correct)).length / n1;
     modeLabel += `（1回分だけなら 1位 ${pctOf(top1)}・5位以内 ${pctOf(top5)}）`;
   }
-  const effortLabel = (t.provider === 'claude' || t.provider === 'gemini') && t.effort !== 'default' ? ` / 深さ ${t.effort}` : '';
+  const effortLabel = t.provider !== 'sarashina' && t.effort !== 'default' ? ` / 深さ ${t.effort}` : '';
   // 割合はエラーにならなかった問いの中で数える（混雑や回数制限で精度が低く見えないように）
   const n = ok.length || 1;
   return {

@@ -141,7 +141,7 @@ const openai: Provider = {
   pickDefault(models) {
     return models.find((m) => m.startsWith('gpt') && !m.includes('mini') && !m.includes('nano')) ?? models[0];
   },
-  async generate(key, model, system, schema, user) {
+  async generate(key, model, system, schema, user, effort) {
     const res = await fetchJson(`${OPENAI}/chat/completions`, {
       method: 'POST',
       headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
@@ -152,7 +152,14 @@ const openai: Provider = {
           { role: 'user', content: user },
         ],
         response_format: { type: 'json_schema', json_schema: { name: 'candidates', strict: true, schema } },
+        // 推論するモデルだけが受け付ける（それ以外のモデルで選ぶと 400 になる）
+        ...(effort === 'default' ? {} : { reasoning_effort: effort }),
       }),
+    }).catch((e: Error) => {
+      if (/HTTP 400/.test(e.message) && /reasoning/i.test(e.message)) {
+        throw new Error(`このモデルは考える深さ「${effort}」に対応していません。別の深さか「モデルの既定」を選んでください（${e.message}）`);
+      }
+      throw e;
     });
     const msg = res.choices?.[0]?.message;
     if (msg?.refusal) throw new Error(`拒否されました（${msg.refusal}）`);
