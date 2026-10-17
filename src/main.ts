@@ -600,7 +600,9 @@ function renderKeyboard() {
   if (engine.stage === 'row') {
     const km = engine.keymap;
     for (const pos of GRID) {
-      if (pos === null || pos === 'C') {
+      if (pos === 'C' && mode === 'sim') {
+        keyboardEl.append(stickCell(''));
+      } else if (pos === null || pos === 'C') {
         keyboardEl.append(spacer());
       } else if (pos === 'close') {
         const cs = km.closeShort;
@@ -621,9 +623,14 @@ function renderKeyboard() {
     if (pos === null) {
       keyboardEl.append(spacer());
     } else if (pos === 'C') {
-      const center = spacer('center-label');
-      center.textContent = row.speak.endsWith('行') ? row.speak : row.label;
-      keyboardEl.append(center);
+      const name = row.speak.endsWith('行') ? row.speak : row.label;
+      if (mode === 'sim') {
+        keyboardEl.append(stickCell(name));
+      } else {
+        const center = spacer('center-label');
+        center.textContent = name;
+        keyboardEl.append(center);
+      }
     } else if (pos === 'close') {
       const back = document.createElement('div');
       back.className = 'cell back';
@@ -668,6 +675,73 @@ function closeShortName(): string {
   const cs = engine.keymap.closeShort;
   if (cs.kind === 'row') return cs.row.speak;
   return cs.item.kind === 'action' ? cs.item.label : t('key.space');
+}
+
+// ---- 仮想スティック ----
+// キーボード操作のとき、3×3 の中央（見ても何も起きない位置）に出す。スマホでも試せるように、
+// 倒した向きがその方向を見た扱い、下に倒すと目を閉じた扱い、離すと中央（画面に視線を戻す）
+const stickEl = document.createElement('div');
+stickEl.className = 'stick';
+stickEl.innerHTML = '<div class="stick-base"><div class="stick-knob"></div></div><span class="stick-label"></span>';
+const stickBase = stickEl.querySelector<HTMLElement>('.stick-base')!;
+const stickKnob = stickEl.querySelector<HTMLElement>('.stick-knob')!;
+/** スティックで指している向き（触れていなければ null） */
+let stickClass: GazeClass | null = null;
+/** 向きの角度（右 0°・上 90°）。下は目を閉じる */
+const STICK_ANGLES: [number, GazeClass][] = [
+  [0, 'R'],
+  [45, 'UR'],
+  [90, 'U'],
+  [135, 'UL'],
+  [180, 'L'],
+  [270, 'closed'],
+  [360, 'R'],
+];
+
+function stickMove(e: PointerEvent) {
+  const r = stickBase.getBoundingClientRect();
+  let dx = e.clientX - (r.left + r.width / 2);
+  let dy = e.clientY - (r.top + r.height / 2);
+  const max = r.width / 2;
+  const dist = Math.hypot(dx, dy);
+  if (dist > max) {
+    dx *= max / dist;
+    dy *= max / dist;
+  }
+  stickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+  if (dist < max * 0.35) {
+    stickClass = 'C';
+  } else {
+    let deg = (Math.atan2(-dy, dx) * 180) / Math.PI;
+    if (deg < 0) deg += 360;
+    stickClass = STICK_ANGLES.reduce((best, cur) => (Math.abs(deg - cur[0]) < Math.abs(deg - best[0]) ? cur : best))[1];
+  }
+  stickEl.classList.toggle('active', stickClass !== 'C');
+}
+
+function stickRelease() {
+  stickClass = null;
+  stickKnob.style.transform = '';
+  stickEl.classList.remove('active', 'dragging');
+}
+
+stickEl.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  feedback.unlock();
+  stickEl.setPointerCapture(e.pointerId);
+  stickEl.classList.add('dragging');
+  stickMove(e);
+});
+stickEl.addEventListener('pointermove', (e) => {
+  if (stickEl.hasPointerCapture(e.pointerId)) stickMove(e);
+});
+stickEl.addEventListener('pointerup', stickRelease);
+stickEl.addEventListener('pointercancel', stickRelease);
+
+/** 中央のマスにスティックを置く（2段目では行の名前も小さく出す） */
+function stickCell(label: string): HTMLElement {
+  stickEl.querySelector('.stick-label')!.textContent = label;
+  return stickEl;
 }
 
 // ---- 視線インジケータ ----（キーボードと同じ3×3の並び）
@@ -863,6 +937,7 @@ const SIM_MAP: Record<string, GazeClass> = {
 };
 
 function simClass(): GazeClass {
+  if (stickClass) return stickClass;
   for (const [k, cls] of Object.entries(SIM_MAP)) if (simKeys.has(k)) return cls;
   if (simKeys.has('arrowdown')) return 'closed';
   const v = simKeys.has('arrowup') ? 'U' : '';

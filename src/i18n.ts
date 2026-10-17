@@ -36,7 +36,7 @@ const JA = {
   <li>← を2秒で編集（続けて ← で1拍削除）、目を閉じ続けると記号（、。？！改行）。</li>
   <li>設定で AI の会社と API キーを入れて使います（キーはこのブラウザだけに保存）。</li>
 </ol>
-<p>シミュレーション：<kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd>/<kbd>A</kbd><kbd>D</kbd>（または矢印キー）を押している間その方向を見ている扱い、<kbd>Space</kbd>（または<kbd>X</kbd>・<kbd>↓</kbd>）で目を閉じる。</p>
+<p>シミュレーション：<kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd>/<kbd>A</kbd><kbd>D</kbd>（または矢印キー）を押している間その方向を見ている扱い、<kbd>Space</kbd>（または<kbd>X</kbd>・<kbd>↓</kbd>）で目を閉じる。スマホでは、キーの中央に出るスティックを倒した向きがその方向、下に倒すと目を閉じる、離すと画面に視線を戻した扱いになります。</p>
 <p>映像は端末内でのみ処理され、送信されません。</p>`,
   'start.desc': '目を大きく動かして、12キー配列でひらがなを入力します。<br />画面から目をそらして使うので、<b>音声の案内</b>を聞きながら操作します。',
   'start.camera': 'カメラで始める',
@@ -208,7 +208,7 @@ const EN: Record<TextKey, string> = {
   <li>Sentence starts and a standalone “i” are capitalized automatically. “Aa” in Edit toggles the case of the last letter.</li>
 </ol>
 <p>Switch to Japanese with “Language” at the top right.</p>
-<p>Simulation: hold <kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd>/<kbd>A</kbd><kbd>D</kbd> (or the arrow keys) to look in that direction, and <kbd>Space</kbd> (or <kbd>X</kbd>/<kbd>↓</kbd>) to close your eyes.</p>
+<p>Simulation: hold <kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd>/<kbd>A</kbd><kbd>D</kbd> (or the arrow keys) to look in that direction, and <kbd>Space</kbd> (or <kbd>X</kbd>/<kbd>↓</kbd>) to close your eyes. On a phone, push the stick in the middle of the keys toward a direction, push it down to close your eyes, and let go to look back at the screen.</p>
 <p>The video is processed on this device only and is never sent anywhere.</p>`,
   'start.desc': 'Type letters by moving your eyes widely.<br />You look away from the screen, so follow the <b>spoken guidance</b>.',
   'start.camera': 'Start with camera',

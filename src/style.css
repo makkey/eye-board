@@ -298,6 +298,47 @@ button[aria-pressed='true'] {
   font-size: 1rem;
   text-align: center;
 }
+/* キーボード操作の仮想スティック（3×3 の中央） */
+.stick {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+.stick-base {
+  display: grid;
+  place-items: center;
+  width: 88%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 2px dashed var(--line);
+  background: var(--panel);
+}
+.stick-knob {
+  width: 42%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--muted);
+  pointer-events: none;
+  transition: transform 0.12s;
+}
+.stick.dragging .stick-knob {
+  transition: none;
+}
+.stick.active .stick-knob {
+  background: var(--accent);
+}
+.stick-label {
+  position: absolute;
+  bottom: 0;
+  font-size: 0.7rem;
+  color: var(--muted);
+  pointer-events: none;
+}
 .cell.back {
   border-style: dashed;
 }
