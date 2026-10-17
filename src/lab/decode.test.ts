@@ -52,6 +52,18 @@ describe('judge', () => {
   });
 });
 
+describe('途中で切れた返答', () => {
+  it('書き終わっている候補だけ拾う', () => {
+    const raw = '{"candidates": [{"reading": "こんにちは", "vowels": "おんいいあ", "text": "こんにちは"}, {"reading": "こんにち';
+    const c = judge(raw, 'おんいいあ', 'こんにちは', 'こんにちは', true);
+    expect(c.map((x) => x.text)).toEqual(['こんにちは']);
+  });
+
+  it('候補が1つも読めなければエラー', () => {
+    expect(() => judge('{"candidates": [{"reading": "こ', 'お', '', '')).toThrow();
+  });
+});
+
 describe('PROMPTS', () => {
   it('v2 の例は規則どおりの母音になっている', () => {
     const examples = [...PROMPTS.v2.system.matchAll(/reading「(.+?)」、vowels「(.+?)」/g)];

@@ -113,7 +113,7 @@ const compact = (s: string) => toHiragana(normalizeSpaces(s)).replace(/ /g, '');
  * 返すのは受け取った全候補。採点・表示には先頭の TOP_N 個を使う。
  */
 export function judge(raw: string, inputVowels: string, goldReading: string, goldText: string, validFirst = false): Candidate[] {
-  const json = JSON.parse(extractJson(raw)) as { candidates?: { text?: string; reading?: string }[] };
+  const json = parseCandidates(raw);
   const want = inputVowels.replace(/ /g, '');
   const all = (json.candidates ?? []).map((c) => {
     const text = String(c.text ?? '');
@@ -136,6 +136,31 @@ export function judge(raw: string, inputVowels: string, goldReading: string, gol
     return true;
   });
   return [...unique.filter((c) => c.valid), ...unique.filter((c) => !c.valid)];
+}
+
+type RawCandidates = { candidates?: { text?: string; reading?: string }[] };
+
+/**
+ * 返答の JSON を読む。同じ内容を繰り返して途中で切れた（閉じていない）JSON でも、
+ * 最後まで書けている候補だけは拾う。
+ */
+function parseCandidates(raw: string): RawCandidates {
+  const body = extractJson(raw);
+  try {
+    return JSON.parse(body) as RawCandidates;
+  } catch (e) {
+    const candidates = [...body.matchAll(/\{[^{}]*\}/g)]
+      .map((m) => {
+        try {
+          return JSON.parse(m[0]);
+        } catch {
+          return null;
+        }
+      })
+      .filter((c) => c && typeof c === 'object' && ('reading' in c || 'text' in c));
+    if (!candidates.length) throw e;
+    return { candidates };
+  }
 }
 
 /** ```json ... ``` で囲まれて返ってきた場合にも対応する */

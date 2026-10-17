@@ -56,7 +56,7 @@ function loadProvider() {
   const p = PROVIDERS[providerId];
   keyInput.value = store.get(`key.${providerId}`) ?? '';
   $('key-help').textContent = `（${p.keyHelp}）`;
-  $('effort-field').hidden = providerId !== 'claude';
+  $('effort-field').hidden = providerId !== 'claude' && providerId !== 'gemini';
   $('relay-field').hidden = providerId !== 'sarashina';
   const models = JSON.parse(store.get(`models.${providerId}`) ?? '[]') as string[];
   fillModels(models, store.get(`model.${providerId}`));
@@ -419,7 +419,7 @@ function summarize(t: Target, mode: string, rs: TaskResult[]): Summary {
     const all = [...bySentence].filter(([i]) => !withError.has(i)).map(([, v]) => v);
     modeLabel += `（文ごと全部1位 ${pct(all.filter(Boolean).length, all.length)}）`;
   }
-  const effortLabel = t.provider === 'claude' && t.effort !== 'default' ? ` / effort ${t.effort}` : '';
+  const effortLabel = (t.provider === 'claude' || t.provider === 'gemini') && t.effort !== 'default' ? ` / 深さ ${t.effort}` : '';
   // 割合はエラーにならなかった問いの中で数える（混雑や回数制限で精度が低く見えないように）
   const n = ok.length || 1;
   return {

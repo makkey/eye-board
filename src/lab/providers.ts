@@ -95,14 +95,16 @@ const gemini: Provider = {
   pickDefault(models) {
     return models.find((m) => m.includes('flash') && !m.includes('lite')) ?? models[0];
   },
-  async generate(key, model, system, schema, user) {
+  async generate(key, model, system, schema, user, effort) {
+    // Gemini 3 以降は thinkingLevel で考える深さを選べる（2.x は対応していないので送らない）
+    const thinking = effort !== 'default' && !/^gemini-[12]\./.test(model) ? { thinkingConfig: { thinkingLevel: effort } } : {};
     const res = await fetchJson(`${GEMINI}/models/${encodeURIComponent(model)}:generateContent`, {
       method: 'POST',
       headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: 'user', parts: [{ text: user }] }],
-        generationConfig: { responseMimeType: 'application/json', responseSchema: toGeminiSchema(schema) },
+        generationConfig: { responseMimeType: 'application/json', responseSchema: toGeminiSchema(schema), ...thinking },
       }),
     });
     const parts: { text?: string }[] = res.candidates?.[0]?.content?.parts ?? [];
