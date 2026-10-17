@@ -151,7 +151,7 @@ const openai: Provider = {
   },
 };
 
-// ---- Sarashina（SB Intuitions。OpenAI 互換の形式だが、対応していない引数がある）----
+// ---- Sarashina（SB Intuitions。OpenAI 互換の形式。書かれていない引数を送ると 400 になる）----
 
 const SARASHINA = 'https://api.sarashina.ai/v1';
 /** 一覧の API が使えない時に出すモデル */
@@ -166,7 +166,7 @@ const sarashina: Provider = {
   async listModels(key) {
     try {
       const res = await fetchJson(`${SARASHINA}/models`, { headers: { authorization: `Bearer ${key}` } });
-      const ids = (res.data ?? []).map((m: { id: string }) => m.id).filter((id: string) => /sarashina/.test(id) && !/embed|rerank|guard/.test(id));
+      const ids = (res.data ?? []).map((m: { id: string }) => m.id).filter((id: string) => /sarashina/.test(id) && !/embed|rerank|guard|translate/.test(id));
       return ids.length ? ids : SARASHINA_MODELS;
     } catch {
       return SARASHINA_MODELS;
@@ -183,7 +183,7 @@ const sarashina: Provider = {
           headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
           body: JSON.stringify({
             model,
-            // max_tokens ではなく max_completion_tokens（max_tokens は 400 になるとの報告がある）
+            // max_tokens は受け付けず、max_completion_tokens（1〜8000）を使う
             max_completion_tokens: 2000,
             messages: [
               { role: 'system', content: system },
