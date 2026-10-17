@@ -1,8 +1,8 @@
 import '../style.css';
 import './lab.css';
 import { DEFAULT_SENTENCES, parseSentences } from './dataset';
-import { SYSTEM_PROMPT, judge, segmentPrompt, sentencePrompt } from './decode';
-import type { Candidate } from './decode';
+import { PROMPTS, TOP_N, judge, segmentPrompt, sentencePrompt } from './decode';
+import type { Candidate, PromptId } from './decode';
 import { PROVIDERS } from './providers';
 import type { Effort, ProviderId } from './providers';
 import { toVowels } from './vowels';
@@ -115,12 +115,25 @@ function currentModel(): string {
 
 const effort = () => $<HTMLSelectElement>('effort').value as Effort;
 
+// ---- 指示文の版 ----
+const promptSelect = $<HTMLSelectElement>('prompt-version');
+for (const v of Object.values(PROMPTS)) {
+  const o = document.createElement('option');
+  o.value = v.id;
+  o.textContent = v.label;
+  promptSelect.append(o);
+}
+const savedPrompt = store.get('prompt');
+promptSelect.value = savedPrompt && savedPrompt in PROMPTS ? savedPrompt : 'v2';
+promptSelect.onchange = () => store.set('prompt', promptSelect.value);
+const promptVersion = () => PROMPTS[promptSelect.value as PromptId];
+
 /** 1回問い合わせて、かかった時間と返答を返す */
-async function ask(user: string): Promise<{ raw: string; ms: number }> {
+async function ask(user: string, p = promptVersion()): Promise<{ raw: string; ms: number }> {
   const key = requireKey();
   const model = currentModel();
   const start = performance.now();
-  const raw = await PROVIDERS[providerId].generate(key, model, SYSTEM_PROMPT, user, effort());
+  const raw = await PROVIDERS[providerId].generate(key, model, p.system, p.schema, user, effort());
   return { raw, ms: performance.now() - start };
 }
 
@@ -151,7 +164,7 @@ $('btn-try').onclick = async () => {
   // 返ってくるまで数秒〜数十秒かかるので、経過時間を出しておく
   const btn = $<HTMLButtonElement>('btn-try');
   btn.disabled = true;
-  const label = `${PROVIDERS[providerId].label}: ${model}`;
+  const label = `${PROVIDERS[providerId].label}: ${model}（指示文 ${promptVersion().id}）`;
   const started = performance.now();
   const tick = () => (status.textContent = `${label} に問い合わせ中…（${((performance.now() - started) / 1000).toFixed(0)}秒）送った母音：${vowels}`);
   tick();
@@ -161,8 +174,10 @@ $('btn-try').onclick = async () => {
     const { raw, ms } = await ask(user);
     $('try-raw').textContent = raw;
     $('try-raw-box').hidden = false;
-    const cands = judge(raw, vowels, '', '');
-    status.textContent = `${label}　${(ms / 1000).toFixed(1)}秒　送った母音：${vowels}`;
+    const all = judge(raw, vowels, '', '', promptVersion().validFirst);
+    const cands = all.slice(0, TOP_N);
+    const dropped = all.length - cands.length;
+    status.textContent = `${label}　${(ms / 1000).toFixed(1)}秒　送った母音：${vowels}` + (dropped > 0 ? `　（ほかに ${dropped} 候補を省略）` : '');
     if (!cands.length) {
       error.textContent = '候補が返ってきませんでした（下の「モデルの返答」を確認してください）。';
     }
@@ -209,7 +224,11 @@ interface Task {
 }
 
 interface TaskResult extends Task {
+  /** 採点・表示に使う上位 TOP_N 個 */
   candidates: Candidate[];
+  /** 受け取った候補の数と、そのうち母音が合う数 */
+  received: number;
+  receivedValid: number;
   ms: number;
   error?: string;
 }
@@ -264,6 +283,8 @@ $('btn-run').onclick = async () => {
   const parallel = Math.min(8, Math.max(1, Number($<HTMLInputElement>('parallel').value) || 3));
   const tasks = buildTasks(mode, limit);
   if (!tasks.length) return;
+  // 実行中に切り替えられても、この実行は同じ版で通す
+  const prompt = promptVersion();
 
   stopRequested = false;
   $<HTMLButtonElement>('btn-run').disabled = true;
@@ -278,11 +299,14 @@ $('btn-run').onclick = async () => {
   const worker = async () => {
     while (!stopRequested && next < tasks.length) {
       const task = tasks[next++];
-      const result: TaskResult = { ...task, candidates: [], ms: 0 };
+      const result: TaskResult = { ...task, candidates: [], received: 0, receivedValid: 0, ms: 0 };
       try {
-        const { raw, ms } = await ask(task.user);
+        const { raw, ms } = await ask(task.user, prompt);
         result.ms = ms;
-        result.candidates = judge(raw, task.vowels, task.goldReading, task.goldText);
+        const all = judge(raw, task.vowels, task.goldReading, task.goldText, prompt.validFirst);
+        result.candidates = all.slice(0, TOP_N);
+        result.received = all.length;
+        result.receivedValid = all.filter((c) => c.valid).length;
       } catch (e) {
         result.error = (e as Error).message;
       }
@@ -297,7 +321,7 @@ $('btn-run').onclick = async () => {
   $<HTMLButtonElement>('btn-run').disabled = false;
   $<HTMLButtonElement>('btn-stop').disabled = true;
   if (!lastRun.length) return;
-  results.push(summarize(model, mode, lastRun));
+  results.push(summarize(model, mode, prompt.id, lastRun));
   store.set('results', JSON.stringify(results));
   renderSummary();
   $('progress').textContent += stopRequested ? '（中止）' : '（完了）';
@@ -307,9 +331,10 @@ $('btn-stop').onclick = () => {
   stopRequested = true;
 };
 
-function summarize(model: string, mode: string, rs: TaskResult[]): Summary {
+function summarize(model: string, mode: string, promptId: PromptId, rs: TaskResult[]): Summary {
   const ok = rs.filter((r) => !r.error);
-  const cands = ok.flatMap((r) => r.candidates);
+  const received = ok.reduce((a, r) => a + r.received, 0);
+  const receivedValid = ok.reduce((a, r) => a + r.receivedValid, 0);
   let modeLabel = mode === 'sentence' ? '文単位' : '文節ごと';
   if (mode === 'segment') {
     // 文の全文節が1位で当たった割合（実際の使い心地に近い）
@@ -320,12 +345,13 @@ function summarize(model: string, mode: string, rs: TaskResult[]): Summary {
   }
   const effortLabel = providerId === 'claude' && effort() !== 'default' ? ` / effort ${effort()}` : '';
   return {
-    model: `${PROVIDERS[providerId].label}: ${model}${effortLabel}`,
+    model: `${PROVIDERS[providerId].label}: ${model}${effortLabel} / 指示文 ${promptId}`,
     mode: modeLabel,
     n: rs.length,
     top1: ok.filter((r) => r.candidates[0]?.correct).length / rs.length,
     top5: ok.filter((r) => r.candidates.some((c) => c.correct)).length / rs.length,
-    validRate: cands.length ? cands.filter((c) => c.valid).length / cands.length : 0,
+    // 並べ替え・絞り込みの前の、モデルが返した候補全体での割合
+    validRate: received ? receivedValid / received : 0,
     avgMs: ok.length ? ok.reduce((a, r) => a + r.ms, 0) / ok.length : 0,
     errors: rs.length - ok.length,
   };

@@ -48,6 +48,9 @@
             <option value="high">high（じっくり）</option>
           </select>
         </label>
+        <label class="field">指示文（モデルへの指示の版。同じモデルで版を変えて比べられます）
+          <select id="prompt-version"></select>
+        </label>
       </section>
 
       <section class="panel">
@@ -112,7 +115,7 @@
         <div class="table-wrap">
           <table id="summary">
             <thead>
-              <tr><th>モデル</th><th>方式</th><th>件数</th><th>1位</th><th>5位以内</th><th>母音が合う候補</th><th>平均時間</th><th>エラー</th></tr>
+              <tr><th>モデル</th><th>方式</th><th>件数</th><th>1位</th><th>5位以内</th><th>母音が合う候補（受け取った全候補のうち）</th><th>平均時間</th><th>エラー</th></tr>
             </thead>
             <tbody></tbody>
           </table>

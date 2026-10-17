@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { judge } from './decode';
+import { PROMPTS, judge } from './decode';
+import { toVowels } from './vowels';
 
 describe('judge', () => {
   const raw = JSON.stringify({
@@ -29,5 +30,39 @@ describe('judge', () => {
     const [c] = judge(r, 'おいうお うああい', 'おみずを ください', 'お水を ください');
     expect(c.valid).toBe(true);
     expect(c.correct).toBe(true);
+  });
+
+  it('validFirst では母音が合う候補を先にし、重複を除く', () => {
+    const r = JSON.stringify({
+      candidates: [
+        { reading: 'きょうは', vowels: 'おうあ', text: '今日は' },
+        { reading: 'きのうは', vowels: 'いおうあ', text: '昨日は' },
+        { reading: 'きのうは', vowels: 'いおうあ', text: '昨日は' },
+        { reading: 'ひのうは', vowels: 'いおうあ', text: '日野うは' },
+      ],
+    });
+    const c = judge(r, 'いおうあ', 'きのうは', '昨日は', true);
+    expect(c.map((x) => x.text)).toEqual(['昨日は', '日野うは', '今日は']);
+    expect(c[0].correct).toBe(true);
+  });
+
+  it('正解が空（試し入力）の時は正解扱いしない', () => {
+    const r = JSON.stringify({ candidates: [{ text: '', reading: '' }] });
+    expect(judge(r, 'あ', '', '')[0].correct).toBe(false);
+  });
+});
+
+describe('PROMPTS', () => {
+  it('v2 の例は規則どおりの母音になっている', () => {
+    const examples = [...PROMPTS.v2.system.matchAll(/reading「(.+?)」、vowels「(.+?)」/g)];
+    expect(examples.length).toBe(3);
+    for (const [, reading, vowels] of examples) expect(toVowels(reading)).toBe(vowels);
+  });
+
+  it('スキーマの必須項目がプロパティと一致する', () => {
+    for (const p of Object.values(PROMPTS)) {
+      const item = p.schema.properties.candidates.items;
+      expect(Object.keys(item.properties)).toEqual(item.required);
+    }
   });
 });
