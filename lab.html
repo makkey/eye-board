@@ -145,11 +145,12 @@
         <div class="table-wrap">
           <table id="summary">
             <thead>
-              <tr><th>モデル</th><th>方式</th><th>件数</th><th>1位</th><th>5位以内</th><th>母音が合う候補（受け取った全候補のうち）</th><th>平均時間</th><th>エラー</th></tr>
+              <tr><th>モデル</th><th>方式</th><th>件数</th><th>1位</th><th>5位以内</th><th>母音が合う候補（受け取った全候補のうち）</th><th>平均時間</th><th>トークン/問（入力・出力）</th><th>エラー</th></tr>
             </thead>
             <tbody></tbody>
           </table>
         </div>
+        <p class="note">トークン/問は1問あたりの平均（何回か聞いた時は全回の合計。出力には考えた分を含む）。各社の料金表の単価（100万トークンあたり）を掛けると費用の目安になります。</p>
         <p class="note">1位・5位以内の割合は、エラーにならなかった問いの中で数えています。エラーになった分は「3.」の「エラーになった〜件だけやり直す」で後から埋められます（API キーを入れ替えてからでも構いません）。</p>
         <div class="row">
           <button id="btn-copy" type="button">結果をコピー（チャットに貼る用）</button>

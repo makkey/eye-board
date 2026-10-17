@@ -4,6 +4,15 @@ import type { JsonSchema } from './decode';
 export type ProviderId = 'claude' | 'gemini' | 'openai' | 'sarashina';
 export type Effort = 'default' | 'minimal' | 'low' | 'medium' | 'high';
 
+/** モデルの返答と、使ったトークン数（料金の見積もり用。分からなければ 0） */
+export interface Reply {
+  text: string;
+  /** 入力（指示文・問い合わせ）のトークン数 */
+  inputTokens: number;
+  /** 出力のトークン数（考えた分を含む。料金は出力の単価でかかる） */
+  outputTokens: number;
+}
+
 export interface Provider {
   id: ProviderId;
   label: string;
@@ -12,8 +21,8 @@ export interface Provider {
   listModels(key: string): Promise<string[]>;
   /** 一覧から既定で選ぶモデル */
   pickDefault(models: string[]): string;
-  /** JSON 文字列を返す */
-  generate(key: string, model: string, system: string, schema: JsonSchema, user: string, effort: Effort): Promise<string>;
+  /** text は JSON 文字列 */
+  generate(key: string, model: string, system: string, schema: JsonSchema, user: string, effort: Effort): Promise<Reply>;
 }
 
 // ---- Claude（公式 SDK をブラウザから直接使う。キーは利用者のブラウザにだけある）----
@@ -52,10 +61,15 @@ const claude: Provider = {
     if (response.stop_reason === 'refusal') {
       throw new Error(`拒否されました（${response.stop_details?.category ?? '理由不明'}）`);
     }
-    return response.content
-      .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
+    const u = response.usage;
+    return {
+      text: response.content
+        .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text')
+        .map((b) => b.text)
+        .join(''),
+      inputTokens: u.input_tokens + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
+      outputTokens: u.output_tokens,
+    };
   },
 };
 
@@ -117,7 +131,13 @@ const gemini: Provider = {
     const parts: { text?: string }[] = res.candidates?.[0]?.content?.parts ?? [];
     const text = parts.map((p) => p.text ?? '').join('');
     if (!text) throw new Error(`応答が空です（${res.candidates?.[0]?.finishReason ?? res.promptFeedback?.blockReason ?? '不明'}）`);
-    return text;
+    const u = res.usageMetadata ?? {};
+    return {
+      text,
+      inputTokens: u.promptTokenCount ?? 0,
+      // 考えた分（thoughtsTokenCount）も出力として課金される
+      outputTokens: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0),
+    };
   },
 };
 
@@ -163,7 +183,7 @@ const openai: Provider = {
     });
     const msg = res.choices?.[0]?.message;
     if (msg?.refusal) throw new Error(`拒否されました（${msg.refusal}）`);
-    return msg?.content ?? '';
+    return chatReply(res);
   },
 };
 
@@ -223,7 +243,7 @@ const sarashina: Provider = {
       }
       throw e;
     }
-    return res.choices?.[0]?.message?.content ?? '';
+    return chatReply(res);
 
     /** json_schema の出力指定が 400 になったモデルは、以後は指示文で JSON を頼む */
     async function callWithFallback() {
@@ -238,6 +258,15 @@ const sarashina: Provider = {
     }
   },
 };
+
+/** OpenAI 形式（chat/completions）の返答から本文とトークン数を取り出す（completion_tokens は考えた分を含む） */
+function chatReply(res: { choices?: { message?: { content?: string } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } }): Reply {
+  return {
+    text: res.choices?.[0]?.message?.content ?? '',
+    inputTokens: res.usage?.prompt_tokens ?? 0,
+    outputTokens: res.usage?.completion_tokens ?? 0,
+  };
+}
 
 /** 出力形式を指定できない時に、指示文で JSON の形を伝える */
 function jsonInstruction(schema: JsonSchema): string {

@@ -203,6 +203,9 @@ interface Answer {
   /** 全部の返答がそろうまでの時間 */
   ms: number;
   raws: string[];
+  /** 全部の回で使ったトークン数の合計 */
+  inputTokens: number;
+  outputTokens: number;
 }
 
 /** t.runs 回同時に問い合わせて採点する。一部が失敗しても、返ってきた分で決める */
@@ -212,7 +215,10 @@ async function ask(user: string, vowels: string, goldReading: string, goldText: 
     Array.from({ length: t.runs }, () => PROVIDERS[t.provider].generate(t.key, t.model, t.prompt.system(t.style), t.prompt.schema, user, t.effort)),
   );
   const ms = performance.now() - start;
-  const raws = settled.flatMap((s) => (s.status === 'fulfilled' ? [s.value] : []));
+  const replies = settled.flatMap((s) => (s.status === 'fulfilled' ? [s.value] : []));
+  const raws = replies.map((r) => r.text);
+  const inputTokens = replies.reduce((a, r) => a + r.inputTokens, 0);
+  const outputTokens = replies.reduce((a, r) => a + r.outputTokens, 0);
   const runs: Candidate[][] = [];
   let received = 0;
   let receivedValid = 0;
@@ -229,7 +235,7 @@ async function ask(user: string, vowels: string, goldReading: string, goldText: 
     }
   }
   if (!runs.length) throw firstError;
-  return { all: mergeRuns(runs, t.prompt.validFirst), single: runs[0], received, receivedValid, ms, raws };
+  return { all: mergeRuns(runs, t.prompt.validFirst), single: runs[0], received, receivedValid, ms, raws, inputTokens, outputTokens };
 }
 
 // ---- 試し入力 ----
@@ -321,6 +327,8 @@ interface TaskResult extends Task {
   candidates: Candidate[];
   /** 1回分だけの上位 TOP_N 個（何回か聞いた時の比較用） */
   single?: Candidate[];
+  inputTokens?: number;
+  outputTokens?: number;
   /** 受け取った候補の数と、そのうち母音が合う数 */
   received: number;
   receivedValid: number;
@@ -339,6 +347,9 @@ interface Summary {
   validRate: number;
   avgMs: number;
   errors: number;
+  /** 1問あたりの平均トークン数（何回か聞いた時は全回の合計。以前の結果には無い） */
+  avgIn?: number;
+  avgOut?: number;
 }
 
 let results: Summary[] = JSON.parse(store.get('results') ?? '[]');
@@ -429,6 +440,8 @@ async function runTasks(rs: TaskResult[], target: Target) {
         r.ms = a.ms;
         r.candidates = a.all.slice(0, TOP_N);
         r.single = a.single.slice(0, TOP_N);
+        r.inputTokens = a.inputTokens;
+        r.outputTokens = a.outputTokens;
         r.received = a.received;
         r.receivedValid = a.receivedValid;
       } catch (e) {
@@ -497,6 +510,8 @@ function summarize(t: Target, mode: string, rs: TaskResult[]): Summary {
     // 並べ替え・絞り込みの前の、モデルが返した候補全体での割合
     validRate: received ? receivedValid / received : 0,
     avgMs: ok.length ? ok.reduce((a, r) => a + r.ms, 0) / ok.length : 0,
+    avgIn: ok.length ? ok.reduce((a, r) => a + (r.inputTokens ?? 0), 0) / ok.length : 0,
+    avgOut: ok.length ? ok.reduce((a, r) => a + (r.outputTokens ?? 0), 0) / ok.length : 0,
     errors: rs.length - ok.length,
   };
 }
@@ -504,12 +519,17 @@ function summarize(t: Target, mode: string, rs: TaskResult[]): Summary {
 const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '-');
 const pctOf = (x: number) => `${Math.round(x * 100)}%`;
 
+function summaryCells(s: Summary): string[] {
+  const tokens = s.avgIn || s.avgOut ? `${Math.round(s.avgIn ?? 0)}・${Math.round(s.avgOut ?? 0)}` : '-';
+  return [s.model, s.mode, String(s.n), pctOf(s.top1), pctOf(s.top5), pctOf(s.validRate), `${(s.avgMs / 1000).toFixed(1)}秒`, tokens, String(s.errors)];
+}
+
 function renderSummary() {
   const tbody = document.querySelector('#summary tbody')!;
   tbody.innerHTML = '';
   for (const s of results) {
     const tr = document.createElement('tr');
-    for (const v of [s.model, s.mode, String(s.n), pctOf(s.top1), pctOf(s.top5), pctOf(s.validRate), `${(s.avgMs / 1000).toFixed(1)}秒`, String(s.errors)]) {
+    for (const v of summaryCells(s)) {
       const td = document.createElement('td');
       td.textContent = v;
       tr.append(td);
@@ -545,9 +565,9 @@ function renderDetail() {
 }
 
 $('btn-copy').onclick = async () => {
-  const lines = ['# 集計', 'モデル | 方式 | 件数 | 1位 | 5位以内 | 母音が合う候補 | 平均時間 | エラー'];
+  const lines = ['# 集計', 'モデル | 方式 | 件数 | 1位 | 5位以内 | 母音が合う候補 | 平均時間 | トークン/問（入力・出力） | エラー'];
   for (const s of results) {
-    lines.push([s.model, s.mode, s.n, pctOf(s.top1), pctOf(s.top5), pctOf(s.validRate), `${(s.avgMs / 1000).toFixed(1)}秒`, s.errors].join(' | '));
+    lines.push(summaryCells(s).join(' | '));
   }
   if (lastRun.length) {
     lines.push('', '# 直近の実行（✓正解 ✗母音が合わない）');
