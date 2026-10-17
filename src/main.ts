@@ -18,6 +18,7 @@ import { ALL_CLASSES, ALL_DIRS, DIR_ARROW, FLOWER_DIRS } from './types';
 import type { AiEffort, AiProvider, Dir, GazeClass, Item, JaInput, Row, Settings, SideDir } from './types';
 import { DEFAULT_MODELS, PROVIDER_LABELS, atSentenceStart, convertPhrase, loadKey, providerGenerate, saveKey } from './vowelime';
 import type { Conv, ConvertInfo, FixedPart } from './vowelime';
+import { InputLog } from './inputlog';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -92,6 +93,8 @@ function syncKeymap() {
 }
 
 const feedback = new Feedback(settings);
+const inputLog = new InputLog();
+inputLog.enabled = settings.inputLog;
 const tracker = new Tracker($<HTMLVideoElement>('video'));
 tracker.smoothing = settings.smoothing;
 
@@ -107,6 +110,8 @@ const engine = new InputEngine(settings, {
     void feedback.say(row.speak);
   },
   rowCommit(row) {
+    // 変換中・候補などの画面は、それぞれの処理の側で記録する
+    if (!row.id.startsWith('jv-')) inputLog.add('行', row.label);
     feedback.play('commit');
     if (row !== spokenRow) void feedback.say(row.speak);
     spokenRow = null;
@@ -121,10 +126,15 @@ const engine = new InputEngine(settings, {
     feedback.play('commit');
     if (item !== spokenItem) void feedback.say(itemSpeech(item));
     spokenItem = null;
+    // 候補の選択などは、それで始まる変換より先に記録する。文字の入力は、入力中の拍に反映した後で記録する
+    const head = engine.keymap.id === HEAD_KEYMAP.id;
+    const logged = logSelection(item);
     applyToText(item);
+    if (!logged) logInput(item, head);
     renderKeyboard();
   },
   cancel(reason) {
+    inputLog.add('もどる', `${reason === 'idle' ? '時間切れ' : '目を閉じた'}${conv !== 'idle' ? `（${conv}）` : ''}`);
     spokenItem = spokenRow = null;
     feedback.play('cancel');
     if (conv === 'partial') {
@@ -145,6 +155,7 @@ const engine = new InputEngine(settings, {
     renderKeyboard();
   },
   retract(item) {
+    inputLog.add('取り消し', `${itemLabel(item)}（閉じ続けた）`);
     if (item.kind === 'action' && item.action === 'more') {
       // 「別の候補」を頼んだが、閉じ続けたので入力にもどる（この後 cancel が来る）
       conv = 'choosing';
@@ -161,6 +172,29 @@ const engine = new InputEngine(settings, {
     undo();
   },
 }, keymapFor(settings.lang, settings.jaInput));
+
+/** 確定した操作を入力ログに残す（母音入力では、何として入ったかと入力中の拍も） */
+/** 母音入力の候補の選択・一部を使う・変換を記録する（記録したら true）。反映する前に呼ぶ */
+function logSelection(item: Item): boolean {
+  if (!isVowelMode()) return false;
+  if (conv === 'choosing' && item.kind === 'char') {
+    const n = lastCands.findIndex((c) => c.text === item.ch) + 1;
+    inputLog.add('選択', `${item.ch}（${n}番目）`);
+  } else if (item.kind === 'action' && item.action === 'partial') {
+    inputLog.add('一部を使う', lastCands[item.ref ?? -1]?.text ?? '');
+  } else if (item.kind === 'action' && item.action === 'pickPart') {
+    inputLog.add('文節を選択', `${item.label}（${(item.ref ?? 0) + 1}つ目）`);
+  } else if (item.kind === 'action' && (item.action === 'convert' || item.action === 'more')) {
+    // 送った内容は startConversion で記録する
+  } else return false;
+  return true;
+}
+
+/** 文字・操作の入力を記録する。反映した後に呼ぶ（母音入力では入力中の拍も残す） */
+function logInput(item: Item, head: boolean) {
+  const kind = head && item.kind === 'char' && /^[ぁ-ゖ]$/.test(item.ch) ? '最初の1文字' : '入力';
+  inputLog.add(kind, itemLabel(item) + (isVowelMode() && pending.length ? `　→［${pendingView()}］` : ''));
+}
 
 // ---- テキスト ----
 const textEl = $<HTMLTextAreaElement>('text');
@@ -360,6 +394,14 @@ async function startConversion(more: boolean) {
     const runs = atSentenceStart(text) ? Math.max(2, settings.aiRuns) : settings.aiRuns;
     const heads = pendingHeads();
     const info: ConvertInfo = { received: 0, rejected: [] };
+    const started = performance.now();
+    inputLog.add(
+      more ? '別の候補' : '変換',
+      `［${pendingView()}］ 文脈「${text.slice(-20)}」 ${settings.aiProvider}:${model} 深さ ${effort} ×${runs}` +
+        (fixedParts.length ? ` 固定 ${fixedParts.map((f) => `${f.index + 1}:${f.text}`).join('・')}` : '') +
+        (more ? ` 除外 ${shown.length}件` : ''),
+    );
+    let retried = false;
     let cands = await convertPhrase(text, vowels, generate, runs, shown, heads, info, '', fixedParts);
     if (token !== convToken) return;
     if (!cands.length && info.rejected.length) {
@@ -372,9 +414,20 @@ async function startConversion(more: boolean) {
       const note = badReading.length
         ? `前の答えの次の候補は、読みを規則どおり母音に直すと入力と合いませんでした。拍の数と読み方を確かめてください：${badReading.slice(0, 5).join('、')}`
         : '';
+      inputLog.add('聞き直し', `全部はじいたため（AI ${info.received}件）`);
+      retried = true;
       cands = await convertPhrase(text, vowels, generate, runs, [...shown, ...wrongHead], heads, info, note, fixedParts);
       if (token !== convToken) return;
     }
+    const secs = ((performance.now() - started) / 1000).toFixed(1);
+    const rejectedEx = [...new Set(info.rejected.map((r) => `${r.text}（${r.reading}）`))].slice(0, 5).join('、');
+    inputLog.add(
+      cands.length ? '候補' : '候補なし',
+      `${secs}秒 ` +
+        (cands.length ? cands.map((c, i) => `${i + 1}.${c.text}`).join(' ') : '') +
+        `（AI ${info.received}件・はじいた ${info.rejected.length}件${retried ? '・聞き直しあり' : ''}）` +
+        (rejectedEx ? ` はじいた例：${rejectedEx}` : ''),
+    );
     if (!cands.length) {
       feedback.play('cancel');
       if (more && lastCands.length) {
@@ -402,6 +455,7 @@ async function startConversion(more: boolean) {
   } catch (e) {
     if (token !== convToken) return;
     console.error(e);
+    inputLog.add('エラー', (e as Error).message);
     conv = 'idle';
     engine.leaveRow();
     feedback.play('cancel');
@@ -935,6 +989,7 @@ const FIELDS: { key: keyof Settings; step?: number; min?: number; max?: number }
   { key: 'ttsRate', step: 0.1, min: 0.5, max: 3 },
   { key: 'tts' },
   { key: 'sound' },
+  { key: 'inputLog' },
 ];
 
 function renderSettings() {
@@ -958,12 +1013,57 @@ function renderSettings() {
       const s = settings as unknown as Record<string, number | boolean>;
       s[f.key] = input.type === 'checkbox' ? input.checked : Number(input.value) || DEFAULT_SETTINGS[f.key] as number;
       tracker.smoothing = settings.smoothing;
+      inputLog.enabled = settings.inputLog;
       saveSettings(settings);
     };
     label.append(t(`set.${f.key}` as TextKey), input);
     box.append(label);
   }
   renderAiSettings(box);
+  renderLogSettings(box);
+}
+
+/** 入力ログのコピーと削除 */
+function renderLogSettings(box: HTMLElement) {
+  const head = document.createElement('h3');
+  head.textContent = t('set.logSection', { n: inputLog.size });
+  const row = document.createElement('div');
+  row.className = 'card-actions';
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.textContent = t('log.copy');
+  copy.onclick = () => void copyInputLog();
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.textContent = t('log.clear');
+  clear.onclick = () => {
+    if (!confirm(t('log.confirmClear'))) return;
+    inputLog.clear();
+    renderSettings();
+  };
+  row.append(copy, clear);
+  const note = document.createElement('p');
+  note.className = 'note';
+  note.textContent = t('log.note');
+  box.append(head, row, note);
+}
+
+/** 入力ログを、設定の要約を付けてコピーする */
+async function copyInputLog() {
+  const header = [
+    '# EyeBoard 入力ログ',
+    `入力方式: ${settings.lang === 'en' ? 'English' : settings.jaInput === 'vowel' ? '日本語・母音入力' : '日本語・12キー'}`,
+    `母音入力の AI: ${settings.aiProvider} ${settings.aiModel} 深さ ${settings.aiEffort} ×${settings.aiRuns} 最初の1文字 ${settings.aiHead}`,
+    `時間: 候補 ${settings.selectMs}ms・長く ${settings.longMs}ms・閉じる ${settings.closeMinMs}ms`,
+    `端末: ${navigator.userAgent}`,
+  ];
+  const textOut = inputLog.text(header);
+  try {
+    await navigator.clipboard.writeText(textOut);
+    alert(t('log.copied', { n: inputLog.size }));
+  } catch {
+    prompt(t('copy.manual'), textOut);
+  }
 }
 
 /** 母音入力（AI 変換）の設定。API キーは設定とは別に、このブラウザだけに保存する */
@@ -1098,6 +1198,8 @@ $('btn-debug').onclick = () => {
 };
 
 // 実機での判定の様子を共有してもらうため、キャリブレーション結果をテキストでコピーする
+$('btn-copy-log').onclick = () => void copyInputLog();
+
 $('btn-copy-cal').onclick = async () => {
   if (!calibration) {
     alert(t('copy.noCal'));

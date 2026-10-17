@@ -23,6 +23,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiRuns: 1,
   // 文頭の文節は文脈が無く外れやすいので、最初の1文字だけ12キーで正確に入れる
   aiHead: 'start',
+  inputLog: true,
 };
 
 const KEY = 'eyeboard.settings.v1';

@@ -121,6 +121,8 @@ export interface Settings {
   aiRuns: number;
   /** 最初の1文字を12キーで入れる：しない／文頭の文節だけ／すべての文節 */
   aiHead: 'off' | 'start' | 'all';
+  /** 入力ログを記録する（このブラウザの中だけ） */
+  inputLog: boolean;
 }
 
 export type AiProvider = 'gemini' | 'openai' | 'claude';
