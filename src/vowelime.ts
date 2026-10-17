@@ -1,5 +1,6 @@
 import { PROMPTS, TOP_N, judge, mergeRuns, segmentPrompt, sentencePrompt } from './lab/decode';
 import type { Candidate, JsonSchema } from './lab/decode';
+import { moraKana, rowFamily } from './lab/vowels';
 import type { AiEffort, AiProvider } from './types';
 
 /**
@@ -37,6 +38,8 @@ export function userPrompt(context: string, vowels: string): string {
 /**
  * 母音の並び（1文節、または空白で区切った複数の文節）を変換して、表記の候補を最大 TOP_N 個返す。
  * runs 回同時に聞いて順位を合算する。exclude（もう見せた候補）は除いて、別の候補を探させる。
+ * heads は区切りごとの最初の拍のかな（利用者が12キーで入れたもの。無ければ null）。
+ * その行で始まらない候補は捨てる（濁点・半濁点・小さい字は区別しない）。
  * 母音が合う候補が1つもなければ空の配列
  */
 export async function convertPhrase(
@@ -45,12 +48,20 @@ export async function convertPhrase(
   generate: Generate,
   runs = 1,
   exclude: string[] = [],
+  heads: (string | null)[] = [],
 ): Promise<string[]> {
   const style = 'fold';
   vowels = vowels.trim().replace(/ +/g, ' ');
   const multi = vowels.includes(' ');
   const prompt = multi ? PROMPTS.v4 : PROMPTS.v2;
   let user = userPrompt(context.slice(-CONTEXT_CHARS), vowels);
+  const segments = vowels.split(' ');
+  const hints = heads.flatMap((h, i) =>
+    h ? [`${segments.length > 1 ? `${i + 1}つ目の区切り` : 'この文節'}は「${h}」の行（${rowFamily(h)}行）の音で始まる`] : [],
+  );
+  if (hints.length) {
+    user += `\n最初の音のヒント（濁点・半濁点の有無や、きゃ・しょ のような小さい字が付くかは問わない）: ${hints.join('／')}`;
+  }
   if (exclude.length) user += `\n次の候補は違いました。これらとは別の候補を挙げてください：${exclude.join('、')}`;
   const settled = await Promise.allSettled(
     Array.from({ length: Math.max(1, runs) }, () => generate(prompt.system(style), prompt.schema, user)),
@@ -63,7 +74,7 @@ export async function convertPhrase(
       continue;
     }
     try {
-      lists.push(judge(s.value, vowels, '', '', true, style, multi).filter((c) => c.valid));
+      lists.push(judge(s.value, vowels, '', '', true, style, multi).filter((c) => c.valid && headsMatch(c.reading, segments, heads)));
     } catch (e) {
       firstError ??= e;
     }
@@ -76,6 +87,20 @@ export async function convertPhrase(
     if (text && !texts.includes(text) && !exclude.includes(text)) texts.push(text);
   }
   return texts.slice(0, TOP_N);
+}
+
+/** 区切りごとの最初の拍が、指定された行で始まっているか */
+export function headsMatch(reading: string, segments: string[], heads: (string | null)[]): boolean {
+  if (!heads.some(Boolean)) return true;
+  const morae = moraKana(reading);
+  if (!morae) return false;
+  let start = 0;
+  for (let i = 0; i < segments.length; i++) {
+    const head = heads[i];
+    if (head && (start >= morae.length || rowFamily(morae[start]) !== rowFamily(head))) return false;
+    start += [...segments[i]].length;
+  }
+  return true;
 }
 
 /** 文頭（何も無いか、文の終わりの記号・改行の直後）か。文頭の文節は文脈が無く、いちばん外れやすい */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toVowels } from './vowels';
+import { moraKana, rowFamily, toVowels } from './vowels';
 
 describe('toVowels', () => {
   it('利用者の例と同じ並びになる', () => {
@@ -30,5 +30,21 @@ describe('toVowels', () => {
     expect(toVowels('ちょっと', 'fold')).toBe('おおお');
     // 文節の最後の っ は前の母音
     expect(toVowels('あっ そう', 'fold')).toBe('ああ おう');
+  });
+});
+
+describe('moraKana・rowFamily', () => {
+  it('拍ごとの最初のかな（拗音は1拍、っ・ー・ん も1拍）', () => {
+    expect(moraKana('きょうは')).toEqual(['き', 'う', 'は']);
+    expect(moraKana('なまたまご が')).toEqual(['な', 'ま', 'た', 'ま', 'ご', 'が']);
+    expect(moraKana('こーひー、')).toEqual(['こ', 'ー', 'ひ', 'ー']);
+    expect(moraKana('abc')).toBeNull();
+  });
+
+  it('行は濁点・半濁点・小さい字を区別しない', () => {
+    expect(rowFamily('が')).toBe('か');
+    expect(rowFamily('ぱ')).toBe('は');
+    expect(rowFamily('ょ')).toBe('や');
+    expect(rowFamily('ナ')).toBe('な');
   });
 });

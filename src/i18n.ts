@@ -28,6 +28,7 @@ const JA = {
 <p>右上の「言語」で、日本語（12キー）→ 日本語（母音入力）→ 英語 の順に切り替わります。</p>
 <p><b>母音入力</b>：各拍の母音だけを入れ、文節ごとに AI が漢字かな交じりに変換します（例：「きのうは」→ い・お・う・あ）。</p>
 <ol>
+  <li>文頭の<b>最初の1文字だけ</b>は、12キーと同じく行 → 文字で入れます（「生卵」なら な）。濁点や小さい字は付けなくて構いません（か を選べば が・きょ も候補になります）。設定で「すべての文節」「しない」にも変えられます。</li>
   <li>← あ・↖ い・↑ う・↗ え・→ お を見て戻ると1拍入ります。ん は ↖ を2秒。っ は次の音の母音、ー は前の音の母音で入れます（とって → お・え・え）。</li>
   <li>1文節（「昨日は」など）入れたら<b>目を閉じる</b>と変換。候補が ← ↖ ↑ ↗ → に並ぶので、見て戻ると確定します。どれも違う時は<b>目を閉じる</b>と、まだ出ていない別の候補を聞き直します。<b>2秒閉じ続ける</b>と入力にもどります（入れた母音は残ります）。</li>
   <li><b>区切りは文節ごと</b>：「ね」を挟んで自然に切れるところ（助詞の後ろ）で区切ります。例：昨日は｜楽しかったね｜ありがとう、お水を｜ください。1つの区切りに2つの文節を入れないでください。思い通りに出ない時は、単語の切れ目や助詞の前でも区切れます（なま｜たまご｜が｜たべたい）。区切りが細かいほど、AI の当て先が絞られます。</li>
@@ -137,6 +138,12 @@ const JA = {
   'set.aiEffort.default': 'モデルの既定',
   'set.aiRuns': '同時に聞く回数（多いほど安定・料金は回数倍）',
   'jv.chooseVowel': '母音を入力',
+  'jv.chooseHead': '最初の1文字を選ぶ',
+  'jv.chooseHeadSub': '12キーと同じく 行 → 文字（濁点は不要）。2文字目からは母音だけ',
+  'set.aiHead': '最初の1文字を12キーで入れる',
+  'set.aiHead.start': '文頭の文節だけ',
+  'set.aiHead.all': 'すべての文節',
+  'set.aiHead.off': 'しない（母音だけ）',
   'jv.chooseVowelSub': '← あ ↖ い ↑ う ↗ え → お　／　→ 2秒で文節の区切り　／　目を閉じる → 変換',
   'jv.pending': '入力中：{v}',
   'jv.waiting': '変換中…',
@@ -287,6 +294,12 @@ const EN: Record<TextKey, string> = {
   'set.aiEffort.default': 'Model default',
   'set.aiRuns': 'Parallel requests (steadier, costs more)',
   'jv.chooseVowel': 'Enter vowels',
+  'jv.chooseHead': 'Choose the first kana',
+  'jv.chooseHeadSub': 'Row, then kana, as on the 12-key layout (no dakuten needed). Vowels only after that',
+  'set.aiHead': 'Enter the first kana with the 12-key layout',
+  'set.aiHead.start': 'First phrase of a sentence',
+  'set.aiHead.all': 'Every phrase',
+  'set.aiHead.off': 'Never (vowels only)',
   'jv.chooseVowelSub': '← a ↖ i ↑ u ↗ e → o · Hold → 2s for a phrase break · Close eyes → convert',
   'jv.pending': 'Typing: {v}',
   'jv.waiting': 'Converting…',

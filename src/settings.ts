@@ -20,6 +20,8 @@ export const DEFAULT_SETTINGS: Settings = {
   aiModel: 'gemini-3.8-flash',
   aiEffort: 'low',
   aiRuns: 1,
+  // 文頭の文節は文脈が無く外れやすいので、最初の1文字だけ12キーで正確に入れる
+  aiHead: 'start',
 };
 
 const KEY = 'eyeboard.settings.v1';

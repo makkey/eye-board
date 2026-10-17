@@ -285,6 +285,18 @@ export class InputEngine {
   }
 
   /**
+   * 1段目のキー配置だけを差し替える（母音入力の「最初の1文字」と母音の切り替え）。
+   * setKeymap と違って目を閉じている状態は保つので、閉じたまま切り替わっても次の操作が誤って動かない
+   */
+  swapKeymap(keymap: Keymap) {
+    this.keymap = keymap;
+    if (this.stage === 'row') {
+      this.candidate = null;
+      this.held = 0;
+    }
+  }
+
+  /**
    * 外から2段目を開く（母音入力の「変換中」や変換候補）。
    * 開いた時点で見ている方向の時間は数え直す（すぐに候補が選ばれないように）
    */

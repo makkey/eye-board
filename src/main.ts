@@ -7,7 +7,8 @@ import { InputEngine } from './engine';
 import { Feedback } from './feedback';
 import { applyEnglish } from './english';
 import { applyItem } from './kana';
-import { flowerIndex, itemLabel, itemSpeech, keymapFor } from './layout';
+import { HEAD_KEYMAP, VOWEL_KEYMAP, flowerIndex, itemLabel, itemSpeech, keymapFor } from './layout';
+import { toVowels } from './lab/vowels';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './settings';
 import { Tracker } from './tracker';
 import type { TrackerFrame } from './tracker';
@@ -36,8 +37,11 @@ let spokenRow: Row | null = null;
 const trail: number[][] = [];
 
 // ---- 母音入力の状態 ----
-/** 入力中の文節の母音（まだ変換していない） */
-let vowels = '';
+/**
+ * 入力中（まだ変換していない）の拍。母音・ん、文節の区切り ' '、
+ * 12キーで入れた最初の1文字は '*な' のように * を付けて持つ
+ */
+let pending: string[] = [];
 /** idle：母音を入力中、waiting：AI に問い合わせ中、choosing：候補を選んでいる */
 let conv: 'idle' | 'waiting' | 'choosing' = 'idle';
 /** 問い合わせごとの番号（やめた・やり直した問い合わせの返事を無視するため） */
@@ -48,7 +52,39 @@ let lastCands: string[] = [];
 /** しばらく案内欄に出すお知らせ（エラーなど） */
 let notice: { text: string; until: number } | null = null;
 const VOWEL_CHARS = new Set([...'あいうえおん']);
-const isVowelMode = () => engine.keymap.id === 'jv';
+const isVowelMode = () => settings.lang === 'ja' && settings.jaInput === 'vowel';
+const isHead = (tok: string) => tok.startsWith('*');
+/** AI に送る母音の並び（最初の1文字は、その母音に直す） */
+const pendingVowels = () => pending.map((tok) => (isHead(tok) ? (toVowels(tok.slice(1), 'fold') ?? '') : tok)).join('');
+/** 区切りごとの、12キーで入れた最初の1文字（無ければ null） */
+function pendingHeads(): (string | null)[] {
+  const heads: (string | null)[] = [];
+  let atStart = true;
+  for (const tok of pending) {
+    if (tok === ' ') atStart = true;
+    else if (atStart) {
+      heads.push(isHead(tok) ? tok.slice(1) : null);
+      atStart = false;
+    }
+  }
+  return heads;
+}
+/** 今の位置で最初の1文字を12キーで入れるか */
+function headWanted(): boolean {
+  if (!isVowelMode() || settings.aiHead === 'off') return false;
+  const atSegmentStart = !pending.length || pending[pending.length - 1] === ' ';
+  if (settings.aiHead === 'all') return atSegmentStart;
+  return !pending.length && atSentenceStart(text);
+}
+/** 母音入力のキー配置を、最初の1文字か母音かに合わせる（変換中・候補を選んでいる間は変えない） */
+function syncKeymap() {
+  if (!isVowelMode() || conv !== 'idle') return;
+  const want = headWanted() ? HEAD_KEYMAP : VOWEL_KEYMAP;
+  if (engine.keymap !== want) {
+    engine.swapKeymap(want);
+    renderKeyboard();
+  }
+}
 
 const feedback = new Feedback(settings);
 const tracker = new Tracker($<HTMLVideoElement>('video'));
@@ -92,6 +128,7 @@ const engine = new InputEngine(settings, {
       conv = 'idle';
       notice = null;
       convToken++;
+      syncKeymap();
     } else {
       void feedback.say(t(reason === 'idle' ? 'say.cancel' : 'say.back'));
     }
@@ -124,20 +161,22 @@ function setText(next: string) {
   if (undoStack.length > 200) undoStack.shift();
   text = next;
   renderText();
+  syncKeymap();
 }
 
-/** 入力中の母音（文節の区切りは｜で見せる） */
-const vowelsView = () => vowels.replace(/ /g, '｜');
+/** 入力中の拍（文節の区切りは｜で見せる） */
+const pendingView = () => pending.map((tok) => (tok === ' ' ? '｜' : isHead(tok) ? tok.slice(1) : tok)).join('');
 
-/** 入力中の母音は［ ］で後ろに付けて見せる（本文・コピーには入れない） */
+/** 入力中の拍は［ ］で後ろに付けて見せる（本文・コピーには入れない） */
 function renderText() {
-  textEl.value = text + (vowels ? `［${vowelsView()}］` : '');
+  textEl.value = text + (pending.length ? `［${pendingView()}］` : '');
   textEl.scrollTop = textEl.scrollHeight;
 }
 
-function setVowels(next: string) {
-  vowels = next;
+function setPending(next: string[]) {
+  pending = next;
   renderText();
+  syncKeymap();
 }
 
 function applyToText(item: Item) {
@@ -160,6 +199,7 @@ function undo() {
   if (!undoStack.length) return;
   text = undoStack.pop()!;
   renderText();
+  syncKeymap();
 }
 
 // ---- 母音入力 ----
@@ -168,19 +208,23 @@ function applyVowelItem(item: Item) {
   if (conv === 'choosing' && item.kind === 'char') {
     // 変換候補を選んだ：文節を確定して、次の文節の入力へ
     conv = 'idle';
-    vowels = '';
+    pending = [];
     setText(text + item.ch);
     renderText();
+    syncKeymap();
     return;
   }
   if (item.kind === 'char') {
-    if (VOWEL_CHARS.has(item.ch)) setVowels(vowels + item.ch);
+    if (engine.keymap.id === HEAD_KEYMAP.id && /^[ぁ-ゖ]$/.test(item.ch)) {
+      // 12キーで入れた最初の1文字。行がその文節の最初の拍の手がかりになる
+      setPending([...pending, `*${item.ch}`]);
+    } else if (VOWEL_CHARS.has(item.ch)) setPending([...pending, item.ch]);
     else if (item.ch === ' ') {
       // 文節の区切り。入力中の文節があって、まだ区切っていない時だけ
-      if (vowels && !vowels.endsWith(' ')) setVowels(vowels + ' ');
-    }
-    else if (vowels) say(t('jv.convertFirst'));
+      if (pending.length && pending[pending.length - 1] !== ' ') setPending([...pending, ' ']);
+    } else if (pending.length) say(t('jv.convertFirst'));
     else setText(text + item.ch);
+    syncKeymap();
     return;
   }
   switch (item.action) {
@@ -191,24 +235,25 @@ function applyVowelItem(item: Item) {
       void startConversion(true);
       return;
     case 'backspace':
-      // 入力中の母音があればそれを1つ消す
-      if (vowels) setVowels([...vowels].slice(0, -1).join(''));
+      // 入力中の拍があればそれを1つ消す
+      if (pending.length) setPending(pending.slice(0, -1));
       else setText(applyItem(text, item));
-      return;
+      break;
     case 'clear':
-      setVowels('');
       setText('');
-      return;
+      setPending([]);
+      break;
     case 'speak':
-      void feedback.say(text + vowels || t('say.empty'), true);
-      return;
+      void feedback.say(text + pendingView() || t('say.empty'), true);
+      break;
     case 'undo':
       undo();
-      return;
+      break;
     default:
-      if (vowels) say(t('jv.convertFirst'));
+      if (pending.length) say(t('jv.convertFirst'));
       else setText(applyItem(text, item));
   }
+  syncKeymap();
 }
 
 function say(msg: string) {
@@ -221,10 +266,9 @@ const WAIT_ROW: Row = { id: 'jv-wait', label: t('jv.waiting'), speak: '', items:
 
 /** more：今の母音で、まだ見せていない別の候補を聞く */
 async function startConversion(more: boolean) {
-  if (!vowels.trim()) {
-    say(t('jv.noVowels'));
-    return;
-  }
+  const vowels = pendingVowels();
+  // 何も入れずに目を閉じた時は何もしない（閉じ続けて記号を出す途中でもあるので、案内も出さない）
+  if (!vowels.trim()) return;
   const key = loadKey(settings.aiProvider);
   if (!key) {
     say(t('jv.noKey'));
@@ -245,6 +289,7 @@ async function startConversion(more: boolean) {
       // 文頭の1文節は文脈が無く外れやすいので、少なくとも2回聞いて候補を広げる（同時に聞くので待ち時間はほぼ同じ）
       atSentenceStart(text) && !vowels.trim().includes(' ') ? Math.max(2, settings.aiRuns) : settings.aiRuns,
       shown,
+      pendingHeads(),
     );
     if (token !== convToken) return;
     if (!cands.length) {
@@ -501,8 +546,14 @@ function updateView(now: number) {
       main = notice.text;
       sub = isVowelMode() ? t('jv.chooseVowelSub') : '';
     } else if (isVowelMode()) {
-      main = vowels ? t('jv.pending', { v: vowelsView() }) : t('jv.chooseVowel');
-      sub = t('jv.chooseVowelSub');
+      const v = pendingView();
+      if (engine.keymap.id === HEAD_KEYMAP.id) {
+        main = v ? t('jv.pending', { v }) : t('jv.chooseHead');
+        sub = t('jv.chooseHeadSub');
+      } else {
+        main = v ? t('jv.pending', { v }) : t('jv.chooseVowel');
+        sub = t('jv.chooseVowelSub');
+      }
     } else {
       main = t('st.chooseRow');
       sub = t('st.chooseRowSub', { name: closeShortName() });
@@ -669,12 +720,12 @@ function switchInput(lang: Settings['lang'], jaInput: JaInput) {
   settings.jaInput = jaInput;
   saveSettings(settings);
   setLang(settings.lang);
-  vowels = '';
+  pending = [];
   conv = 'idle';
   convToken++;
   notice = null;
   renderText();
-  engine.setKeymap(keymapFor(settings.lang, settings.jaInput), performance.now());
+  engine.setKeymap(isVowelMode() && headWanted() ? HEAD_KEYMAP : keymapFor(settings.lang, settings.jaInput), performance.now());
   applyTexts();
   feedback.unlock();
   void feedback.say(t(isVowelMode() ? 'lang.nameVowel' : 'lang.name'));
@@ -883,6 +934,22 @@ function renderAiSettings(box: HTMLElement) {
     ),
   );
   field(
+    'set.aiHead',
+    select(
+      [
+        ['start', t('set.aiHead.start')],
+        ['all', t('set.aiHead.all')],
+        ['off', t('set.aiHead.off')],
+      ],
+      settings.aiHead,
+      (v) => {
+        settings.aiHead = v as Settings['aiHead'];
+        saveSettings(settings);
+        syncKeymap();
+      },
+    ),
+  );
+  field(
     'set.aiRuns',
     select(
       ['1', '2', '3'].map((n) => [n, n]),
@@ -1015,4 +1082,5 @@ function drawDebug() {
 
 // ---- 起動 ----
 applyTexts();
+syncKeymap();
 requestAnimationFrame(frameLoop);

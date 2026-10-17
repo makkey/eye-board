@@ -189,6 +189,12 @@ export const VOWEL_KEYMAP: Keymap = {
   closeLong: JV.kigo,
 };
 
+/**
+ * 母音入力で「最初の1文字」を入れる時の配置。12キーと同じで、選んだかなはその文節の最初の拍の手がかりになる
+ * （行だけを使うので、濁点や小さい字を付ける必要はない）
+ */
+export const HEAD_KEYMAP: Keymap = { ...JA_KEYMAP, id: 'jvh' };
+
 export const KEYMAPS: Record<Lang, Keymap> = { ja: JA_KEYMAP, en: EN_KEYMAP };
 
 export function keymapFor(lang: Lang, jaInput: JaInput): Keymap {

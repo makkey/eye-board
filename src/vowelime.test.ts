@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { atSentenceStart, convertPhrase } from './vowelime';
+import { atSentenceStart, convertPhrase, headsMatch } from './vowelime';
 import type { Generate } from './vowelime';
 
 const reply = (...cands: [string, string][]) => JSON.stringify({ candidates: cands.map(([reading, text]) => ({ reading, vowels: '', text })) });
@@ -102,5 +102,25 @@ describe('atSentenceStart', () => {
     expect(atSentenceStart('ありがとう。')).toBe(true);
     expect(atSentenceStart('元気？\n')).toBe(true);
     expect(atSentenceStart('昨日は')).toBe(false);
+  });
+});
+
+describe('最初の1文字', () => {
+  it('行のヒントを送り、その行で始まらない候補は捨てる', async () => {
+    let sent = '';
+    const gen: Generate = async (_s, _sc, user) => {
+      sent = user;
+      return reply(['またたまごが', 'また卵が'], ['なまたまごが', '生卵が'], ['ただたまごが', 'ただ卵が']);
+    };
+    expect(await convertPhrase('', 'ああああおあ', gen, 1, [], ['な'])).toEqual(['生卵が']);
+    expect(sent).toContain('「な」の行');
+  });
+
+  it('区切りごとに確かめる（濁点の違いは問わない）', () => {
+    expect(headsMatch('なまたまごが たべたい', ['ああああおあ', 'あえあい'], ['な', 'た'])).toBe(true);
+    expect(headsMatch('なまたまごが だべたい', ['ああああおあ', 'あえあい'], ['な', 'た'])).toBe(true);
+    expect(headsMatch('なまたまごが あえあい', ['ああああおあ', 'あえあい'], ['な', 'た'])).toBe(false);
+    expect(headsMatch('きょうは', ['おうあ'], ['か'])).toBe(true);
+    expect(headsMatch('なんでも', ['あんえお'], [null])).toBe(true);
   });
 });

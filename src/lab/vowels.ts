@@ -72,3 +72,41 @@ function fold(tokens: string[]): string | null {
 }
 
 const VOWEL_SET = new Set(['あ', 'い', 'う', 'え', 'お']);
+
+const SMALL_KANA = new Set([...'ぁぃぅぇぉゃゅょゎ']);
+
+/**
+ * 読みを拍に分け、各拍の最初のかなを返す（「きょう」→ き・う）。
+ * っ・ー・ん も1拍。拍の数は toVowels の母音の数と同じになる。変換できない文字があれば null
+ */
+export function moraKana(reading: string): string[] | null {
+  const out: string[] = [];
+  for (const c of toHiragana(stripPunctuation(reading)).replace(/[\s　]+/g, '')) {
+    if (SMALL_KANA.has(c) && out.length) continue;
+    if (!VOWEL[c] && !KEEP.has(c) && !SMALL[c]) return null;
+    out.push(c);
+  }
+  return out;
+}
+
+const ROW_FAMILY: Record<string, string> = {};
+for (const [row, chars] of [
+  ['あ', 'あいうえおぁぃぅぇぉゔ'],
+  ['か', 'かきくけこがぎぐげご'],
+  ['さ', 'さしすせそざじずぜぞ'],
+  ['た', 'たちつてとだぢづでどっ'],
+  ['な', 'なにぬねの'],
+  ['は', 'はひふへほばびぶべぼぱぴぷぺぽ'],
+  ['ま', 'まみむめも'],
+  ['や', 'やゆよゃゅょ'],
+  ['ら', 'らりるれろ'],
+  ['わ', 'わをゎ'],
+  ['ん', 'ん'],
+] as const) {
+  for (const c of chars) ROW_FAMILY[c] = row;
+}
+
+/** かなの行（濁点・半濁点・小さい字は区別しない：が → か、ぱ → は）。分からなければ null */
+export function rowFamily(kana: string): string | null {
+  return ROW_FAMILY[toHiragana(kana)[0]] ?? null;
+}

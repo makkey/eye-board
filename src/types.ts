@@ -115,6 +115,8 @@ export interface Settings {
   aiEffort: AiEffort;
   /** 同じ問いを同時に聞く回数（順位を合算する） */
   aiRuns: number;
+  /** 最初の1文字を12キーで入れる：しない／文頭の文節だけ／すべての文節 */
+  aiHead: 'off' | 'start' | 'all';
 }
 
 export type AiProvider = 'gemini' | 'openai' | 'claude';
