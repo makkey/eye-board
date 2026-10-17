@@ -127,29 +127,55 @@ async function ask(user: string): Promise<{ raw: string; ms: number }> {
 // ---- 試し入力 ----
 $('btn-try').onclick = async () => {
   const out = $('try-result');
+  const status = $('try-status');
+  const error = $('try-error');
   out.innerHTML = '';
+  error.textContent = '';
+  $('try-raw-box').hidden = true;
+
   const vowels = toVowels($<HTMLInputElement>('try-input').value);
   if (!vowels) {
-    alert('ひらがな・カタカナ・母音（あいうえお・ん・っ・ー）と空白だけで入力してください');
+    error.textContent = '母音（あいうえお・ん・っ・ー）、ひらがな・カタカナ、空白だけで入力してください。';
     return;
   }
-  $('try-vowels').textContent = `送る母音：${vowels}`;
   const context = $<HTMLInputElement>('try-context').value.trim();
+  let model: string;
+  try {
+    requireKey();
+    model = currentModel();
+  } catch (e) {
+    error.textContent = (e as Error).message;
+    return;
+  }
+
+  // 返ってくるまで数秒〜数十秒かかるので、経過時間を出しておく
   const btn = $<HTMLButtonElement>('btn-try');
   btn.disabled = true;
+  const label = `${PROVIDERS[providerId].label}: ${model}`;
+  const started = performance.now();
+  const tick = () => (status.textContent = `${label} に問い合わせ中…（${((performance.now() - started) / 1000).toFixed(0)}秒）送った母音：${vowels}`);
+  tick();
+  const timer = setInterval(tick, 500);
   try {
     const user = context ? segmentPrompt(context, vowels) : sentencePrompt(vowels);
     const { raw, ms } = await ask(user);
+    $('try-raw').textContent = raw;
+    $('try-raw-box').hidden = false;
     const cands = judge(raw, vowels, '', '');
+    status.textContent = `${label}　${(ms / 1000).toFixed(1)}秒　送った母音：${vowels}`;
+    if (!cands.length) {
+      error.textContent = '候補が返ってきませんでした（下の「モデルの返答」を確認してください）。';
+    }
     for (const c of cands) {
       const li = document.createElement('li');
-      li.textContent = `${c.text}（${c.reading}）${c.valid ? '' : ' ✗母音が合わない'}`;
+      li.textContent = `${c.text}（${c.reading}）${c.valid ? '' : '　✗母音が合わない'}`;
       out.append(li);
     }
-    $('try-vowels').textContent = `送る母音：${vowels}　${(ms / 1000).toFixed(1)}秒`;
   } catch (e) {
-    alert((e as Error).message);
+    status.textContent = '';
+    error.textContent = `エラー：${(e as Error).message}`;
   } finally {
+    clearInterval(timer);
     btn.disabled = false;
   }
 };

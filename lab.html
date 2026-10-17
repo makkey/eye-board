@@ -52,14 +52,28 @@
 
       <section class="panel">
         <h2>2. 試しに入力してみる</h2>
-        <label class="field">ここまでの文（任意。文節ごとに推測させる時の前の文）
-          <input id="try-context" placeholder="例：昨日は" />
-        </label>
-        <label class="field">母音（空白で文節を区切る。ひらがな・カタカナの読みを入れると母音に変換）
+        <p class="note">
+          実際に使う時と同じように母音を入れて、1で選んだモデルがどんな文を返すかを見ます。
+          文節の区切りに空白を入れてください（例：「昨日は 楽しかったね」→「いおうあ あおいあっあえ」）。
+          母音の代わりに、ひらがな・カタカナの読み（例：「きのうは たのしかったね」）を入れても、自動で母音に変換して送ります。
+        </p>
+        <label class="field">母音
           <input id="try-input" placeholder="例：いおうあ あおいあっあえ あいあおう" />
         </label>
-        <div class="row"><button id="btn-try" type="button" class="primary">候補を出す</button><span id="try-vowels" class="note"></span></div>
+        <details>
+          <summary>前の文を指定する（任意）</summary>
+          <p class="note">
+            文節ごとに入力する場面の再現用です。すでに確定した文をここに入れると、上の母音を「その続きの1文節」として推測させます。空欄なら、母音全体を1つの文として推測します。
+          </p>
+          <input id="try-context" placeholder="例：昨日は" />
+        </details>
+        <div class="row"><button id="btn-try" type="button" class="primary">候補を出す</button><span id="try-status" class="note"></span></div>
         <ol id="try-result" class="candidates"></ol>
+        <p id="try-error" class="error" role="alert"></p>
+        <details id="try-raw-box" hidden>
+          <summary>モデルの返答（そのまま）</summary>
+          <pre id="try-raw"></pre>
+        </details>
       </section>
 
       <section class="panel">
