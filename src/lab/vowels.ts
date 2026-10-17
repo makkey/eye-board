@@ -37,7 +37,11 @@ export function normalizeSpaces(s: string): string {
   return s.replace(/[\s　]+/g, ' ').trim();
 }
 
-export type VowelStyle = 'mark' | 'fold';
+/**
+ * っ・ー の入れ方。mark：どちらもそのまま、fold：っ は次の拍・ー は前の拍の母音、
+ * sokuon：っ はそのまま（専用のキー）、ー は前の拍の母音
+ */
+export type VowelStyle = 'mark' | 'fold' | 'sokuon';
 
 /** 変換できない文字があれば null */
 export function toVowels(reading: string, style: VowelStyle = 'mark'): string | null {
@@ -51,18 +55,18 @@ export function toVowels(reading: string, style: VowelStyle = 'mark'): string | 
     } else if (VOWEL[c]) out.push(VOWEL[c]);
     else return null;
   }
-  return style === 'fold' ? fold(out) : out.join('');
+  return style === 'mark' ? out.join('') : fold(out, style === 'fold');
 }
 
 /** ー を前の拍の母音に、っ を次の拍の母音に置き換える（同じ文節の中で。なければ前後どちらかの母音） */
-function fold(tokens: string[]): string | null {
+function fold(tokens: string[], foldTsu: boolean): string | null {
   const t = [...tokens];
   for (let i = 0; i < t.length; i++) {
     if (t[i] !== 'ー') continue;
     if (i === 0 || !VOWEL_SET.has(t[i - 1])) return null;
     t[i] = t[i - 1];
   }
-  for (let i = t.length - 1; i >= 0; i--) {
+  for (let i = t.length - 1; i >= 0 && foldTsu; i--) {
     if (t[i] !== 'っ') continue;
     if (i + 1 < t.length && VOWEL_SET.has(t[i + 1])) t[i] = t[i + 1];
     else if (i > 0 && VOWEL_SET.has(t[i - 1])) t[i] = t[i - 1];

@@ -118,7 +118,7 @@ describe('区切り位置', () => {
 
 describe('PROMPTS', () => {
   it('v2 の例は規則どおりの母音になっている', () => {
-    for (const style of ['mark', 'fold'] as const) {
+    for (const style of ['mark', 'fold', 'sokuon'] as const) {
       const examples = [...PROMPTS.v2.system(style).matchAll(/「(.+?)」→ reading「(.+?)」、vowels「(.+?)」/g)];
       expect(examples.length).toBe(3);
       for (const [, input, reading, vowels] of examples) {
@@ -130,7 +130,7 @@ describe('PROMPTS', () => {
   });
 
   it('規則の中の例（かな→母音）も規則どおり', () => {
-    for (const style of ['mark', 'fold'] as const) {
+    for (const style of ['mark', 'fold', 'sokuon'] as const) {
       const text = PROMPTS.v1.system(style);
       const pairs = [...text.matchAll(/([ぁ-んー]+)→([あいうえおんっー]+)/g)];
       expect(pairs.length).toBeGreaterThan(0);

@@ -161,7 +161,7 @@ export const EN_KEYMAP: Keymap = {
 // ---- 日本語・母音入力 ----
 // 各拍の母音だけを入れ、文節ごとに AI が漢字かな交じりに変換する。
 // 母音は12キーの2段目と同じフラワー配置（← あ ↖ い ↑ う ↗ え → お）で、1回見るだけで入る。
-// っ は次の拍の母音、ー は前の拍の母音で入れる（キーが要らない）。
+// っ は ↑（う）を2秒で入れ、ー は前の拍の母音で入れる（とって → お・っ・え、かーてん → あ・あ・え・ん）。
 
 function vowelRow(v: string): Row {
   return { id: `jv-${v}`, label: v, speak: v, items: [], direct: c(v) };
@@ -169,6 +169,7 @@ function vowelRow(v: string): Row {
 
 const JV: Record<string, Row> = {
   n: vowelRow('ん'),
+  tsu: { id: 'jv-っ', label: 'っ', speak: '小さいつ', items: [], direct: c('っ', '小さいつ') },
   // 文節の区切り：未確定のまま次の文節を入れ、まとめて変換する
   sep: { id: 'jv-sep', label: '区切り', speak: '区切り', items: [], direct: c(' ', '区切り', '区切り') },
   kigo: {
@@ -183,8 +184,8 @@ export const VOWEL_KEYMAP: Keymap = {
   id: 'jv',
   lang: 'ja',
   rowByDir: { L: vowelRow('あ'), UL: vowelRow('い'), U: vowelRow('う'), UR: vowelRow('え'), R: vowelRow('お') },
-  // 編集は12キーと同じく ←（「← を2秒、続けて ←」で1拍削除）。ん は ↖、文節の区切りは → を2秒
-  longRowByDir: { L: JA.edit, UL: JV.n, R: JV.sep },
+  // 編集は12キーと同じく ←（「← を2秒、続けて ←」で1拍削除）。ん は ↖、っ は ↑、文節の区切りは → を2秒
+  longRowByDir: { L: JA.edit, UL: JV.n, U: JV.tsu, R: JV.sep },
   closeShort: { kind: 'item', item: a('convert', '変換', '変換') },
   closeLong: JV.kigo,
 };

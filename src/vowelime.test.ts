@@ -13,9 +13,9 @@ describe('convertPhrase', () => {
       sent = user;
       return reply(['たのしかったね', '楽しかったね'], ['たのしかった', '楽しかった'], ['たのしかったぜ', '楽しかったぜ']);
     };
-    const got = await convertPhrase('昨日は', 'あおいあああえ', gen);
+    const got = await convertPhrase('昨日は', 'あおいあっあえ', gen);
     expect(sent).toContain('ここまでの文: 昨日は');
-    expect(sent).toContain('あおいあああえ');
+    expect(sent).toContain('あおいあっあえ');
     expect(got).toEqual(['楽しかったね', '楽しかったぜ']);
   });
 
@@ -115,6 +115,7 @@ describe('最初の1文字', () => {
     expect(p).toContain('2つ目の区切り（4拍）: ＊あ ＊え ＊あ ＊い');
     expect(p).toContain('母音列（確かめ用）: ああああお あえあい');
     expect(slotPrompt('昨日は', ['あんいえ'], ['か'])).toContain('文節（4拍）: か ん ＊い ＊え');
+    expect(slotPrompt('', ['おっえ'], ['と'])).toContain('文節（3拍）: と っ ＊え');
   });
 
   it('行のヒントを送り、その行で始まらない候補は捨てる', async () => {

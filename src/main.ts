@@ -49,6 +49,8 @@ let pending: string[] = [];
 let conv: 'idle' | 'waiting' | 'choosing' | 'partial' = 'idle';
 /** 問い合わせごとの番号（やめた・やり直した問い合わせの返事を無視するため） */
 let convToken = 0;
+/** 今の問い合わせを始めた時刻（「変換中…（5秒）」の表示用） */
+let convStartedAt = 0;
 /** 今の母音について、これまでに見せた候補（「別の候補」で除く）と、直近に並べた候補 */
 let shown: string[] = [];
 let lastCands: Conv[] = [];
@@ -57,11 +59,11 @@ let partialCand: Conv | null = null;
 let fixedParts: FixedPart[] = [];
 /** しばらく案内欄に出すお知らせ（エラーなど） */
 let notice: { text: string; until: number } | null = null;
-const VOWEL_CHARS = new Set([...'あいうえおん']);
+const VOWEL_CHARS = new Set([...'あいうえおんっ']);
 const isVowelMode = () => settings.lang === 'ja' && settings.jaInput === 'vowel';
 const isHead = (tok: string) => tok.startsWith('*');
 /** AI に送る母音の並び（最初の1文字は、その母音に直す） */
-const pendingVowels = () => pending.map((tok) => (isHead(tok) ? (toVowels(tok.slice(1), 'fold') ?? '') : tok)).join('');
+const pendingVowels = () => pending.map((tok) => (isHead(tok) ? (toVowels(tok.slice(1), 'sokuon') ?? '') : tok)).join('');
 /** 区切りごとの、12キーで入れた最初の1文字（無ければ null） */
 function pendingHeads(): (string | null)[] {
   const heads: (string | null)[] = [];
@@ -445,6 +447,7 @@ async function startConversion(more: boolean) {
   }
   const token = ++convToken;
   conv = 'waiting';
+  convStartedAt = performance.now();
   notice = null;
   if (!more) shown = [];
   // 変換が始まった：目を閉じたまま待っても記号に切り替えない（記号は入力中の拍が無い時だけ）
@@ -626,6 +629,11 @@ function renderKeyboard() {
       const name = row.speak.endsWith('行') ? row.speak : row.label;
       if (mode === 'sim') {
         keyboardEl.append(stickCell(name));
+      } else if (row.id === WAIT_ROW.id) {
+        // 変換中：中央のマスにも回る輪を出す
+        const center = spacer('center-label');
+        center.innerHTML = `<span class="spinner" aria-hidden="true"></span><span>${name}</span>`;
+        keyboardEl.append(center);
       } else {
         const center = spacer('center-label');
         center.textContent = name;
@@ -860,7 +868,7 @@ function updateView(now: number) {
       sub = t('st.chooseRowSub', { name: closeShortName() });
     }
   } else if (conv === 'waiting') {
-    main = t('jv.waiting');
+    main = t('jv.waitingSecs', { s: Math.floor((now - convStartedAt) / 1000) });
     sub = t('jv.waitingSub');
   } else if (conv === 'partial' && cand?.kind !== 'item') {
     main = t('jv.choosePart');
@@ -880,6 +888,8 @@ function updateView(now: number) {
   }
   statusMain.textContent = main;
   statusSub.textContent = sub;
+  // 変換中は回る輪を出す（止まっていると思われないように）
+  statusMain.classList.toggle('busy', conv === 'waiting');
 
   if (debugOn) drawDebug();
 }

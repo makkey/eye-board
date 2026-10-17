@@ -139,7 +139,8 @@ const promptVersion = () => PROMPTS[promptSelect.value as PromptId];
 
 // ---- っ・ー の入れ方 ----
 const styleSelect = $<HTMLSelectElement>('vowel-style');
-styleSelect.value = store.get('style') === 'fold' ? 'fold' : 'mark';
+const savedStyle = store.get('style');
+styleSelect.value = savedStyle === 'fold' || savedStyle === 'sokuon' ? savedStyle : 'mark';
 const vowelStyle = () => styleSelect.value as VowelStyle;
 styleSelect.onchange = () => {
   store.set('style', styleSelect.value);
@@ -507,7 +508,7 @@ function summarize(t: Target, mode: string, rs: TaskResult[]): Summary {
   // 割合はエラーにならなかった問いの中で数える（混雑や回数制限で精度が低く見えないように）
   const n = ok.length || 1;
   return {
-    model: `${PROVIDERS[t.provider].label}: ${t.model}${effortLabel} / 指示文 ${t.prompt.id}${t.runs > 1 ? ` / ${t.runs}回合算` : ''}${t.style === 'fold' ? ' / っー母音' : ''}`,
+    model: `${PROVIDERS[t.provider].label}: ${t.model}${effortLabel} / 指示文 ${t.prompt.id}${t.runs > 1 ? ` / ${t.runs}回合算` : ''}${t.style === 'fold' ? ' / っー母音' : t.style === 'sokuon' ? ' / ー母音' : ''}`,
     mode: modeLabel,
     n: rs.length,
     top1: ok.filter((r) => r.candidates[0]?.correct).length / n,

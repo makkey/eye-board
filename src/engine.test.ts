@@ -330,9 +330,10 @@ describe('InputEngine（母音入力）', () => {
     expect(engine.stage).toBe('row');
   });
 
-  it('↖ を2秒で ん、長押しの無い方向は見続けても母音のまま', () => {
+  it('↖ を2秒で ん、↑ を2秒で っ、長押しの無い方向は見続けても母音のまま', () => {
     expect(run([['C', 300], ['UL', 2200], ['C', 300]], VOWEL_KEYMAP).log).toEqual(['ん']);
-    expect(run([['C', 300], ['U', 2200], ['C', 300]], VOWEL_KEYMAP).log).toEqual(['う']);
+    expect(run([['C', 300], ['U', 2200], ['C', 300]], VOWEL_KEYMAP).log).toEqual(['っ']);
+    expect(run([['C', 300], ['UR', 2200], ['C', 300]], VOWEL_KEYMAP).log).toEqual(['え']);
     expect(run([['C', 300], ['R', 2200], ['C', 300]], VOWEL_KEYMAP).log).toEqual(['区切り']);
   });
 

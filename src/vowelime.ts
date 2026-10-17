@@ -7,7 +7,8 @@ import type { AiEffort, AiProvider } from './types';
  * 母音入力の変換（1文節ずつ）。母音ラボ（lab.html）で測った方式をそのまま使う：
  * 1文節なら指示文 v2、区切った複数の文節なら v4（v2 に、1区切りに自立語は1つまで・細かい区切りも可、の決まりを加えたもの）。
  * ラボの文節ごとの測定では、1文節に v3 を使うと母音の合う候補が減り、文頭の文節で正解が5位以内に入らないことが増えたため。
- * っ・ー は母音で表す、前の文節までの確定した文を文脈として付ける、母音が入力と合わない候補は捨てる。
+ * っ はそのまま（↑ の2秒で入れる）、ー は前の拍の母音で表す、前の文節までの確定した文を文脈として付ける、
+ * 母音が入力と合わない候補は捨てる。
  */
 
 /** 会社ごとの既定のモデル（ラボで文節ごとの精度が良かったもの） */
@@ -88,7 +89,7 @@ export interface ConvertInfo {
  */
 export function slotPrompt(context: string, segments: string[], heads: (string | null)[]): string {
   const lines = segments.map((seg, i) => {
-    const morae = [...seg].map((v, j) => (j === 0 && heads[i] ? heads[i]! : v === 'ん' ? 'ん' : `＊${v}`));
+    const morae = [...seg].map((v, j) => (j === 0 && heads[i] ? heads[i]! : v === 'ん' || v === 'っ' ? v : `＊${v}`));
     const name = segments.length > 1 ? `${i + 1}つ目の区切り` : '文節';
     return `${name}（${morae.length}拍）: ${morae.join(' ')}`;
   });
@@ -98,7 +99,7 @@ export function slotPrompt(context: string, segments: string[], heads: (string |
       : '次の拍の並びに当てはまる、次の文節';
   return [
     `ここまでの文: ${context || '（文頭）'}`,
-    `${what}。「な」のようなかなは、その音そのもの（濁点・半濁点の有無や、きゃ・しょ のような小さい字が付くかは問わない。な なら な行）。「＊あ」は あ段の音ならどれでもよく（あ・か・が・さ・ざ・た・だ・な・は・ば・ぱ・ま・や・ら・わ、きゃ のような拗音も）、「＊い」「＊う」「＊え」「＊お」も同じ。「ん」は ん。拍の数を必ず合わせてください。`,
+    `${what}。「な」のようなかなは、その音そのもの（濁点・半濁点の有無や、きゃ・しょ のような小さい字が付くかは問わない。な なら な行）。「＊あ」は あ段の音ならどれでもよく（あ・か・が・さ・ざ・た・だ・な・は・ば・ぱ・ま・や・ら・わ、きゃ のような拗音も）、「＊い」「＊う」「＊え」「＊お」も同じ。「ん」は ん、「っ」は小さい っ。拍の数を必ず合わせてください。`,
     ...lines,
     `母音列（確かめ用）: ${segments.join(' ')}`,
   ].join('\n');
@@ -124,7 +125,7 @@ export async function convertPhrase(
   /** 利用者が合っていると選んだ区切り。そこが違う候補は捨てる */
   fixed: FixedPart[] = [],
 ): Promise<Conv[]> {
-  const style = 'fold';
+  const style = 'sokuon';
   vowels = vowels.trim().replace(/ +/g, ' ');
   const multi = vowels.includes(' ');
   const prompt = multi ? PROMPTS.v4 : PROMPTS.v2;

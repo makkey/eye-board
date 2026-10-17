@@ -48,3 +48,11 @@ describe('moraKana・rowFamily', () => {
     expect(rowFamily('ナ')).toBe('な');
   });
 });
+
+describe('toVowels（sokuon）', () => {
+  it('っ はそのまま、ー は前の母音', () => {
+    expect(toVowels('めがねを とって ください', 'sokuon')).toBe('えあえお おっえ うああい');
+    expect(toVowels('こーひー', 'sokuon')).toBe('おおいい');
+    expect(toVowels('きのうは たのしかったね', 'sokuon')).toBe('いおうあ あおいあっあえ');
+  });
+});
