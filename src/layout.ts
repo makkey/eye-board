@@ -55,12 +55,13 @@ const JA: Record<string, Row> = {
     id: 'edit',
     label: '編集',
     speak: '編集',
+    // 削除は →（「→ を2秒、続けて →」で削除できるように）
     items: [
-      a('backspace', '⌫削除', '削除'),
+      a('clear', '全消去', '全消去'),
       a('space', '空白', '空白'),
       a('speak', '🔊読上', '読み上げ'),
       a('undo', '↶戻す', '元に戻す'),
-      a('clear', '全消去', '全消去'),
+      a('backspace', '⌫削除', '削除'),
     ],
   },
 };
@@ -136,12 +137,13 @@ const EN: Record<string, Row> = {
     id: 'en-edit',
     label: 'Edit',
     speak: 'edit',
+    // Backspace は →（「→ を2秒、続けて →」で消せるように）
     items: [
-      a('backspace', '⌫Del', 'delete'),
+      a('clear', 'Clear', 'clear'),
       a('case', 'Aa', 'case'),
       a('speak', '🔊Speak', 'speak'),
       a('undo', '↶Undo', 'undo'),
-      a('clear', 'Clear', 'clear'),
+      a('backspace', '⌫Del', 'delete'),
     ],
   },
 };

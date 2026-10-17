@@ -44,7 +44,7 @@ setLang(settings.lang);
 const engine = new InputEngine(settings, {
   rowCandidate(row, long) {
     spokenRow = row;
-    feedback.play(long ? 'long' : 'tick');
+    feedback.play(long ? 'long' : 'select');
     void feedback.say(row.speak);
   },
   rowCommit(row) {
@@ -55,7 +55,7 @@ const engine = new InputEngine(settings, {
   },
   itemCandidate(item) {
     spokenItem = item;
-    feedback.play('tick');
+    feedback.play('select');
     void feedback.say(itemSpeech(item));
   },
   commit(item) {
@@ -115,8 +115,18 @@ $('btn-clear').onclick = () => setText('');
 // ---- キーボード表示 ----
 const keyboardEl = $('keyboard');
 
-/** 画面上の並び（上段：↖ ↑ ↗、下段：← 中央 →） */
-const DIR_GRID: Dir[] = ['UL', 'U', 'UR', 'L', 'C', 'R'];
+/**
+ * 画面上の並び（3×3）。中央は「見ても何も起きない」ことが伝わるよう空けておき、
+ * 目を閉じる（下を見る）操作は、下を見る向きに合わせて3段目の中央に置く。
+ * 'close' = 目を閉じる、null = 空き
+ */
+const GRID: (Dir | 'close' | null)[] = ['UL', 'U', 'UR', 'L', 'C', 'R', null, 'close', null];
+
+function spacer(cls = 'spacer') {
+  const el = document.createElement('div');
+  el.className = cls;
+  return el;
+}
 
 /** キーの下に小さく出す残りの文字（「あ」→「いうえお」）。ラベルが複数文字なら出さない（「ABCDE」など） */
 function rowSub(row: Row): string {
@@ -139,49 +149,55 @@ function renderKeyboard() {
 
   if (engine.stage === 'row') {
     const km = engine.keymap;
-    for (const dir of DIR_GRID) {
-      if (dir === 'C') {
+    for (const pos of GRID) {
+      if (pos === null || pos === 'C') {
+        keyboardEl.append(spacer());
+      } else if (pos === 'close') {
         const cs = km.closeShort;
         const label = cs.kind === 'row' ? cs.row.label : itemLabel(cs.item);
         const sub = cs.kind === 'row' ? rowSub(cs.row) : closeShortName();
-        keyboardEl.append(keyEl(dir, label, sub, km.closeLong.label, t('key.closeHint')));
+        keyboardEl.append(keyEl('close', label, sub, km.closeLong.label, t('key.closeHint')));
       } else {
-        const row = km.rowByDir[dir];
-        keyboardEl.append(keyEl(dir, row.label, rowSub(row), km.longRowByDir[dir].label, DIR_ARROW[dir]));
+        const row = km.rowByDir[pos];
+        keyboardEl.append(keyEl(pos, row.label, rowSub(row), km.longRowByDir[pos].label, DIR_ARROW[pos]));
       }
     }
     return;
   }
 
-  // フラワー配置：左から時計回りに あ・い・う・え・お
+  // フラワー配置：左から時計回りに あ・い・う・え・お。中央は行の名前だけ（ボタンではない）
   const row = engine.row!;
-  for (const dir of DIR_GRID) {
-    const cell = document.createElement('div');
-    if (dir === 'C') {
-      cell.className = 'cell center';
-      // 左の「あ段」と紛れないよう、中央は行の名前を小さく出す
-      cell.innerHTML = `<span class="main">${row.speak.endsWith('行') ? row.speak : row.label}</span>`;
+  for (const pos of GRID) {
+    if (pos === null) {
+      keyboardEl.append(spacer());
+    } else if (pos === 'C') {
+      const center = spacer('center-label');
+      center.textContent = row.speak.endsWith('行') ? row.speak : row.label;
+      keyboardEl.append(center);
+    } else if (pos === 'close') {
+      const back = document.createElement('div');
+      back.className = 'cell back';
+      back.id = 'cell-close';
+      back.innerHTML = `<span class="hint">${t('key.closeHint')}</span><span class="main small">${t('char.back')}</span>`;
+      keyboardEl.append(back);
     } else {
-      const item = row.items[flowerIndex(dir)];
+      const item = row.items[flowerIndex(pos)];
+      const cell = document.createElement('div');
       cell.className = item ? 'cell' : 'cell empty';
-      cell.id = `cell-${dir}`;
+      cell.id = `cell-${pos}`;
       const label = item ? itemLabel(item) : '';
       // 「゛゜小」「⌫削除」のような長いラベルは小さめに
       const cls = [...label].length > 2 ? 'main small' : 'main';
-      cell.innerHTML = `<span class="hint">${DIR_ARROW[dir]}</span><span class="${cls}">${label}</span>`;
+      cell.innerHTML = `<span class="hint">${DIR_ARROW[pos]}</span><span class="${cls}">${label}</span>`;
+      keyboardEl.append(cell);
     }
-    keyboardEl.append(cell);
   }
-  const back = document.createElement('div');
-  back.className = 'cell back';
-  back.innerHTML = `<span class="main">${t('char.back')}</span>`;
-  keyboardEl.append(back);
 }
 
-function keyEl(dir: Dir, label: string, sub: string, longLabel: string, hint: string) {
+function keyEl(pos: Dir | 'close', label: string, sub: string, longLabel: string, hint: string) {
   const el = document.createElement('div');
   el.className = 'key';
-  el.id = `key-${dir}`;
+  el.id = `key-${pos}`;
   // 「ABCDE」のような長いラベルは小さめに
   const cls = [...label].length > 2 ? 'main small' : 'main';
   el.innerHTML = `<span class="hint">${hint}</span><span class="${cls}">${label}</span>
@@ -195,15 +211,19 @@ function closeShortName(): string {
   return cs.kind === 'row' ? cs.row.speak : t('key.space');
 }
 
-// ---- 視線インジケータ ----
+// ---- 視線インジケータ ----（キーボードと同じ3×3の並び）
 const gazeEl = $('gaze');
 const gazeCells = {} as Record<GazeClass, HTMLElement>;
-for (const cls of [...DIR_GRID, 'closed'] as GazeClass[]) {
+for (const pos of GRID) {
   const c = document.createElement('div');
-  c.textContent = cls === 'closed' ? '' : DIR_ARROW[cls];
-  if (cls === 'closed') c.className = 'closed';
+  if (pos === null) {
+    c.className = 'spacer';
+  } else {
+    const cls: GazeClass = pos === 'close' ? 'closed' : pos;
+    c.textContent = cls === 'closed' ? '◡' : DIR_ARROW[cls];
+    gazeCells[cls] = c;
+  }
   gazeEl.append(c);
-  gazeCells[cls] = c;
 }
 
 // ---- 毎フレームの描画 ----
@@ -222,9 +242,11 @@ function updateView(now: number) {
     if (cand?.kind === 'row') {
       $(keyId)?.classList.add('candidate');
       if (cand.long) $(keyId)?.classList.add('long-active');
-    } else if (engine.dir !== 'C') $(keyId)?.classList.add('hover');
+    } else if (engine.closedStart !== null) $('key-close')?.classList.add('hover');
+    else if (engine.dir !== 'C') $(keyId)?.classList.add('hover');
   } else {
     if (cand?.kind === 'item') $(`cell-${cand.dir}`)?.classList.add('candidate');
+    else if (engine.closedStart !== null) $('cell-close')?.classList.add('hover');
     else if (engine.dir !== 'C') $(`cell-${engine.dir}`)?.classList.add('hover');
   }
 
@@ -428,7 +450,7 @@ $('btn-start-sim').onclick = () => {
 function applyTexts() {
   document.documentElement.lang = settings.lang;
   applyStaticTexts();
-  gazeCells.closed.textContent = t('gaze.closed');
+  gazeCells.closed.title = t('gaze.closed');
   renderKeyboard();
   if (mode !== 'none') setModeBadge();
   if ($<HTMLDialogElement>('settings').open) renderSettings();

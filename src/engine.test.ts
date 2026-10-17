@@ -4,12 +4,15 @@ import { EN_KEYMAP, JA_KEYMAP, itemLabel } from './layout';
 import { DEFAULT_SETTINGS } from './settings';
 import type { Dir } from './types';
 
+// 時間の組み立てを読みやすくするため、テストでは候補になるまでを 400ms に固定する
+const SETTINGS = { ...DEFAULT_SETTINGS, selectMs: 400 };
+
 /** 方向の列（[dir, ms] や ['closed', ms]）を 10ms 刻みで流し、確定した項目を返す */
-function run(steps: [Dir | 'closed', number][], keymap = JA_KEYMAP) {
+function run(steps: [Dir | 'closed', number][], keymap = JA_KEYMAP, settings = SETTINGS) {
   const log: string[] = [];
   const rows: string[] = [];
   const engine = new InputEngine(
-    DEFAULT_SETTINGS,
+    settings,
     {
       rowCommit: (row) => rows.push(row.id),
       commit: (item) => log.push(itemLabel(item)),
@@ -69,7 +72,36 @@ describe('InputEngine', () => {
         ['C', 300],
       ]).log[0];
     expect((['UL', 'U', 'UR', 'L', 'R'] as Dir[]).map((d) => first(d, 600))).toEqual(['あ', 'か', 'さ', 'た', 'は']);
-    expect((['UL', 'U', 'UR', 'L', 'R'] as Dir[]).map((d) => first(d, 2300))).toEqual(['ま', 'や', 'ら', 'わ', '⌫削除']);
+    expect((['UL', 'U', 'UR', 'L', 'R'] as Dir[]).map((d) => first(d, 2300))).toEqual(['ま', 'や', 'ら', 'わ', '全消去']);
+  });
+
+  it('既定の設定では 0.6 秒見ると候補になる', () => {
+    const look = (ms: number) =>
+      run(
+        [
+          ['C', 300],
+          ['U', ms],
+          ['C', 300],
+          ['L', 900],
+          ['C', 300],
+        ],
+        JA_KEYMAP,
+        DEFAULT_SETTINGS,
+      ).log;
+    expect(DEFAULT_SETTINGS.selectMs).toBe(600);
+    expect(look(500)).toEqual([]);
+    expect(look(900)).toEqual(['か']);
+  });
+
+  it('→ を2秒、続けて → で削除', () => {
+    const { log } = run([
+      ['C', 300],
+      ['R', 2300],
+      ['C', 300],
+      ['R', 600],
+      ['C', 300],
+    ]);
+    expect(log).toEqual(['⌫削除']);
   });
 
   it('選択時間に満たない視線移動は無視', () => {
@@ -269,12 +301,12 @@ describe('InputEngine（英語）', () => {
     expect(rows).toEqual(['en-symbols']);
   });
 
-  it('→ 2秒で編集、← で削除', () => {
+  it('→ を2秒、続けて → で削除', () => {
     const { log } = en([
       ['C', 300],
       ['R', 2300],
       ['C', 300],
-      ['L', 600],
+      ['R', 600],
       ['C', 300],
     ]);
     expect(log).toEqual(['⌫Del']);

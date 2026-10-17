@@ -20,7 +20,7 @@ const JA = {
   'help.body': `<ol>
   <li>顔がカメラに正面から映るように置き、<b>キャリブレーション</b>を行います（音声で案内します）。</li>
   <li>行を選ぶ：↖ あ・↑ か・↗ さ・← た・→ は を見る（約0.4秒）→ 読み上げを聞いたら<b>画面に視線を戻す</b>と確定。</li>
-  <li>同じ方向を<b>2秒</b>見続けると ↖ ま・↑ や・↗ ら・← わ・→ 編集。</li>
+  <li>同じ方向を<b>2秒</b>見続けると ↖ ま・↑ や・↗ ら・← わ・→ 編集（続けて → で削除）。短く見て選んだ時と2秒で切り替わった時は、違う音が鳴ります。</li>
   <li><b>目を閉じる（または下を見る）</b>：0.6秒で「な行」、そのまま2秒で「記号」。読み上げを聞いたら目を開けます。</li>
   <li>文字を選ぶ：<b>左から時計回りに あ・い・う・え・お</b>（← ↖ ↑ ↗ →）。見て戻ると確定。</li>
   <li>何も選ばずに戻る：2段目で<b>目を閉じる（下を見る）</b>。5秒何もしなくても戻ります。</li>
@@ -56,7 +56,7 @@ const JA = {
   'key.closeHint': '目を閉じる／下',
   'key.long': '2秒: {label}',
   'key.space': 'スペース',
-  'char.back': '目を閉じる／下を見る → もどる',
+  'char.back': 'もどる',
   'st.trackerStopped': '顔認識が止まっています',
   'st.noFace': '顔が見つかりません',
   'st.noFaceSub': 'カメラに顔が正面から映るようにしてください',
@@ -137,7 +137,7 @@ const EN: Record<TextKey, string> = {
   'help.body': `<ol>
   <li>Place the device so the camera sees your face straight on, then <b>calibrate</b> (spoken guidance).</li>
   <li>Choose a group: look ↖ ABCDE · ↑ FGHIJ · ↗ KLMNO · ← PQRST · → UVWXY (about 0.4 s). When you hear it, <b>look back at the screen</b> to confirm.</li>
-  <li>Keep looking for <b>2 s</b> for ↖ 1–5 · ↑ 6–0 · ↗ !-:;" · ← ()/@& · → Edit.</li>
+  <li>Keep looking for <b>2 s</b> for ↖ 1–5 · ↑ 6–0 · ↗ !-:;" · ← ()/@& · → Edit (then → again to delete). A short look and the 2 s switch play different sounds.</li>
   <li><b>Close your eyes (or look down)</b>: a space at 0.6 s; keep them closed for 2 s for . , ? ' Z (the space is taken back).</li>
   <li>Choose a letter: <b>clockwise from the left</b> (← ↖ ↑ ↗ →), e.g. ←A ↖B ↑C ↗D →E. Look and come back to confirm.</li>
   <li>Go back without choosing: <b>close your eyes (look down)</b> on the second level. Doing nothing for 5 s also goes back.</li>
@@ -174,7 +174,7 @@ const EN: Record<TextKey, string> = {
   'key.closeHint': 'Close / look down',
   'key.long': '2s: {label}',
   'key.space': 'Space',
-  'char.back': 'Close eyes / look down → back',
+  'char.back': 'Back',
   'st.trackerStopped': 'Face tracking has stopped',
   'st.noFace': 'No face found',
   'st.noFaceSub': 'Face the camera directly',

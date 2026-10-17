@@ -1,7 +1,7 @@
 import type { Settings } from './types';
 
 export const DEFAULT_SETTINGS: Settings = {
-  selectMs: 400,
+  selectMs: 600,
   longMs: 2000,
   closeMinMs: 600,
   idleMs: 5000,
@@ -17,11 +17,19 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 const KEY = 'eyeboard.settings.v1';
+/** 保存形式の版。2: selectMs の既定値を 400 → 600 に変更 */
+const VERSION = 2;
 
 export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      // 旧版の既定値のまま保存されていたら、新しい既定値に移す
+      if ((saved._v ?? 1) < 2 && saved.selectMs === 400) delete saved.selectMs;
+      delete saved._v;
+      return { ...DEFAULT_SETTINGS, ...saved };
+    }
   } catch {
     // 保存領域が使えない環境では既定値
   }
@@ -30,7 +38,7 @@ export function loadSettings(): Settings {
 
 export function saveSettings(s: Settings) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(s));
+    localStorage.setItem(KEY, JSON.stringify({ ...s, _v: VERSION }));
   } catch {
     // ignore
   }

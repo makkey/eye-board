@@ -1,27 +1,62 @@
 import type { Lang, Settings } from './types';
 
-type Tone = 'tick' | 'long' | 'commit' | 'cancel' | 'start' | 'done';
+type Tone = 'select' | 'long' | 'commit' | 'cancel' | 'start' | 'done';
 
-const TONES: Record<Tone, [number, number][]> = {
-  // [周波数Hz, 長さms] の列
-  tick: [[880, 60]],
-  long: [
-    [660, 60],
-    [990, 80],
-  ],
-  commit: [
-    [1046, 50],
-    [1318, 80],
-  ],
-  cancel: [
-    [440, 80],
-    [330, 120],
-  ],
-  start: [[1046, 120]],
-  done: [
-    [784, 70],
-    [1046, 120],
-  ],
+interface ToneSpec {
+  /** [周波数Hz, 長さms] の列 */
+  notes: [number, number][];
+  wave: OscillatorType;
+  gain: number;
+  /** 振動できる端末で振動させるパターン（ms） */
+  vibrate?: number[];
+}
+
+const TONES: Record<Tone, ToneSpec> = {
+  // 短く見て候補になった：はっきり聞こえる明るい上昇2音（ここで戻れば確定）
+  select: {
+    notes: [
+      [1175, 90],
+      [1760, 160],
+    ],
+    wave: 'triangle',
+    gain: 0.45,
+    vibrate: [40],
+  },
+  // 見続けて長い方に切り替わった：低い下降2音（select と聞き分けられるように）
+  long: {
+    notes: [
+      [523, 140],
+      [349, 220],
+    ],
+    wave: 'square',
+    gain: 0.18,
+    vibrate: [30, 60, 30],
+  },
+  commit: {
+    notes: [
+      [1046, 50],
+      [1318, 80],
+    ],
+    wave: 'sine',
+    gain: 0.25,
+  },
+  cancel: {
+    notes: [
+      [440, 80],
+      [330, 120],
+    ],
+    wave: 'sine',
+    gain: 0.25,
+  },
+  start: { notes: [[1046, 120]], wave: 'sine', gain: 0.25 },
+  done: {
+    notes: [
+      [784, 70],
+      [1046, 120],
+    ],
+    wave: 'sine',
+    gain: 0.25,
+  },
 };
 
 /** 画面を見ていない間の手がかりになる音と読み上げ */
@@ -49,14 +84,17 @@ export class Feedback {
   }
 
   play(tone: Tone) {
+    const spec = TONES[tone];
+    if (spec.vibrate) navigator.vibrate?.(spec.vibrate);
     if (!this.settings.sound || !this.ctx) return;
     let at = this.ctx.currentTime;
-    for (const [freq, ms] of TONES[tone]) {
+    for (const [freq, ms] of spec.notes) {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
+      osc.type = spec.wave;
       osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, at);
-      gain.gain.exponentialRampToValueAtTime(0.25, at + 0.01);
+      gain.gain.exponentialRampToValueAtTime(spec.gain, at + 0.01);
       gain.gain.exponentialRampToValueAtTime(0.0001, at + ms / 1000);
       osc.connect(gain).connect(this.ctx.destination);
       osc.start(at);
