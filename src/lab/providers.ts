@@ -107,6 +107,12 @@ const gemini: Provider = {
         contents: [{ role: 'user', parts: [{ text: user }] }],
         generationConfig: { responseMimeType: 'application/json', responseSchema: toGeminiSchema(schema), ...thinking },
       }),
+    }).catch((e: Error) => {
+      // 深さの段階はモデルによって使えるものが違う（gemini-3.8-flash は minimal 不可など）
+      if (/HTTP 400: Thinking level/i.test(e.message)) {
+        throw new Error(`このモデルは考える深さ「${effort}」に対応していません。別の深さを選んでください（${e.message}）`);
+      }
+      throw e;
     });
     const parts: { text?: string }[] = res.candidates?.[0]?.content?.parts ?? [];
     const text = parts.map((p) => p.text ?? '').join('');
