@@ -20,7 +20,7 @@
           例：「昨日は 楽しかったね ありがとう」→「いおうあ あおいあっあえ あいあおう」。
         </p>
         <p class="note">
-          API キーはこのブラウザの中だけに保存され、選んだ会社（Anthropic / Google / OpenAI）の API に直接送られます。
+          API キーはこのブラウザの中だけに保存され、選んだ会社（Anthropic / Google / OpenAI / SB Intuitions）の API に直接送られます。
           実行すると API の利用料金がかかります。
         </p>
       </section>
@@ -51,6 +51,10 @@
         <label class="field">指示文（モデルへの指示の版。同じモデルで版を変えて比べられます）
           <select id="prompt-version"></select>
         </label>
+        <details>
+          <summary>実際に送っている内容を見る</summary>
+          <pre id="prompt-preview"></pre>
+        </details>
       </section>
 
       <section class="panel">

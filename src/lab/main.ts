@@ -125,8 +125,29 @@ for (const v of Object.values(PROMPTS)) {
 }
 const savedPrompt = store.get('prompt');
 promptSelect.value = savedPrompt && savedPrompt in PROMPTS ? savedPrompt : 'v2';
-promptSelect.onchange = () => store.set('prompt', promptSelect.value);
 const promptVersion = () => PROMPTS[promptSelect.value as PromptId];
+function showPrompt() {
+  const p = promptVersion();
+  $('prompt-preview').textContent = [
+    '【指示（system）】',
+    p.system,
+    '',
+    '【問い合わせ（user）の例】',
+    '文単位：',
+    sentencePrompt('いおうあ あおいあっあえ あいあおう'),
+    '',
+    '文節ごと：',
+    segmentPrompt('昨日は', 'あおいあっあえ'),
+    '',
+    '【返答の形（JSON Schema）】',
+    JSON.stringify(p.schema, null, 2),
+  ].join('\n');
+}
+promptSelect.onchange = () => {
+  store.set('prompt', promptSelect.value);
+  showPrompt();
+};
+showPrompt();
 
 /** 1回問い合わせて、かかった時間と返答を返す */
 async function ask(user: string, p = promptVersion()): Promise<{ raw: string; ms: number }> {

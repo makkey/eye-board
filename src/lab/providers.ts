@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { JsonSchema } from './decode';
 
-export type ProviderId = 'claude' | 'gemini' | 'openai';
+export type ProviderId = 'claude' | 'gemini' | 'openai' | 'sarashina';
 export type Effort = 'default' | 'low' | 'medium' | 'high';
 
 export interface Provider {
@@ -151,10 +151,91 @@ const openai: Provider = {
   },
 };
 
-export const PROVIDERS: Record<ProviderId, Provider> = { claude, gemini, openai };
+// ---- Sarashina（SB Intuitions。OpenAI 互換の形式だが、対応していない引数がある）----
+
+const SARASHINA = 'https://api.sarashina.ai/v1';
+/** 一覧の API が使えない時に出すモデル */
+const SARASHINA_MODELS = ['sarashina3-mini', 'sarashina3-nano'];
+/** json_schema の出力指定が通らなかったモデル（以後は指示文で JSON を頼む） */
+const noSchema = new Set<string>();
+
+const sarashina: Provider = {
+  id: 'sarashina',
+  label: 'Sarashina',
+  keyHelp: 'https://sarashina.ai/ に Google アカウントでログインして作成。無料ベータは1分あたりの回数制限が厳しいので「同時に送る数」は1に',
+  async listModels(key) {
+    try {
+      const res = await fetchJson(`${SARASHINA}/models`, { headers: { authorization: `Bearer ${key}` } });
+      const ids = (res.data ?? []).map((m: { id: string }) => m.id).filter((id: string) => /sarashina/.test(id) && !/embed|rerank|guard/.test(id));
+      return ids.length ? ids : SARASHINA_MODELS;
+    } catch {
+      return SARASHINA_MODELS;
+    }
+  },
+  pickDefault(models) {
+    return models.find((m) => m.includes('mini')) ?? models[0];
+  },
+  async generate(key, model, system, schema, user) {
+    const call = (structured: boolean) =>
+      withRetryOn429(() =>
+        fetchJson(`${SARASHINA}/chat/completions`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            // max_tokens ではなく max_completion_tokens（max_tokens は 400 になるとの報告がある）
+            max_completion_tokens: 2000,
+            messages: [
+              { role: 'system', content: system },
+              { role: 'user', content: structured ? user : `${user}\n\n${jsonInstruction(schema)}` },
+            ],
+            ...(structured ? { response_format: { type: 'json_schema', json_schema: { name: 'candidates', strict: true, schema } } } : {}),
+          }),
+        }),
+      );
+    let res;
+    if (noSchema.has(model)) res = await call(false);
+    else {
+      try {
+        res = await call(true);
+      } catch (e) {
+        if (!/HTTP 400/.test((e as Error).message)) throw e;
+        noSchema.add(model);
+        res = await call(false);
+      }
+    }
+    return res.choices?.[0]?.message?.content ?? '';
+  },
+};
+
+/** 出力形式を指定できない時に、指示文で JSON の形を伝える */
+function jsonInstruction(schema: JsonSchema): string {
+  const fields = schema.properties.candidates.items.required.map((f) => `"${f}": "..."`).join(', ');
+  return `次の形の JSON だけを返してください（説明やコードブロックは不要）：{"candidates": [{${fields}}]}`;
+}
+
+/** 回数制限（429）の時は少し待ってやり直す */
+async function withRetryOn429<T>(f: () => Promise<T>): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await f();
+    } catch (e) {
+      if (i >= 5 || !/HTTP 429/.test((e as Error).message)) throw e;
+      await new Promise((r) => setTimeout(r, 12000));
+    }
+  }
+}
+
+export const PROVIDERS: Record<ProviderId, Provider> = { claude, gemini, openai, sarashina };
 
 async function fetchJson(url: string, init: RequestInit) {
-  const res = await fetch(url, init);
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch (e) {
+    // ブラウザからの直接呼び出し（CORS）を受け付けていない API だと、ここで失敗する
+    throw new Error(`接続できませんでした（${(e as Error).message}）。この API がブラウザからの直接呼び出しを受け付けていない可能性があります`);
+  }
   const body = await res.text();
   if (!res.ok) {
     let message = body;
