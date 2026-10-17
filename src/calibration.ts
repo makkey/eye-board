@@ -87,7 +87,10 @@ export class CalibrationRun {
       this.recording = null;
       this.feedback.play('done');
     }
-    if (this.seen > 0 && this.missed / this.seen > 0.5) {
+    if (this.seen === 0) {
+      throw new Error('カメラの映像を顔認識に渡せていません。');
+    }
+    if (this.missed / this.seen > 0.5) {
       throw new Error('顔を見失うことが多すぎました。カメラの位置や明るさを確認してください。');
     }
     const cal = buildCalibration(this.samples);

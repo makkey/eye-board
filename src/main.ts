@@ -235,7 +235,10 @@ function updateView(t: number) {
   // 案内文
   let main = '';
   let sub = '';
-  if (mode === 'camera' && !lastFrame?.faceFound) {
+  if (mode === 'camera' && tracker.active && t - tracker.lastFrameAt > 2000) {
+    main = '顔認識が止まっています';
+    sub = trackerDiagnostics();
+  } else if (mode === 'camera' && !lastFrame?.faceFound) {
     main = '顔が見つかりません';
     sub = 'カメラに顔が正面から映るようにしてください';
   } else if (engine.closedStart !== null) {
@@ -388,6 +391,12 @@ async function runCalibration() {
   calibEl.hidden = false;
   calRun = new CalibrationRun(feedback, showCalProgress);
   try {
+    // スマホでは最初の数秒、顔認識の準備（GPU の初期化など）でフレームが来ないことがある
+    $('calib-arrow').textContent = '⏳';
+    $('calib-text').textContent = '顔認識を準備中…';
+    $('calib-count').textContent = '';
+    const ready = await waitForFrames(10, 15000);
+    if (!ready) throw new Error('顔認識が動き始めませんでした。');
     calibration = await calRun.run();
     saveCalibration(calibration);
     const weak = ALL_CLASSES.filter((c) => calibration!.quality[c] < 0.8);
@@ -398,12 +407,34 @@ async function runCalibration() {
       );
     }
   } catch (e) {
-    if ((e as Error).message !== '中断しました') alert((e as Error).message);
+    if ((e as Error).message !== '中断しました') alert(`${(e as Error).message}\n\n${trackerDiagnostics()}`);
   } finally {
     calRun = null;
     calibEl.hidden = true;
     setMode('camera');
   }
+}
+
+/** 顔認識が n フレーム以上処理するまで待つ */
+async function waitForFrames(n: number, timeoutMs: number): Promise<boolean> {
+  const start = performance.now();
+  const base = tracker.frames;
+  while (performance.now() - start < timeoutMs) {
+    if (calRun === null) return false;
+    if (tracker.frames - base >= n) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return false;
+}
+
+function trackerDiagnostics(): string {
+  const v = $<HTMLVideoElement>('video');
+  return [
+    `処理: ${tracker.delegate}`,
+    `処理したフレーム: ${tracker.frames}`,
+    `映像: ${v.videoWidth}×${v.videoHeight}`,
+    `エラー: ${tracker.lastError ?? 'なし'}`,
+  ].join(' / ');
 }
 
 function showCalProgress(p: CalProgress) {
@@ -561,6 +592,7 @@ function drawDebug() {
   const dist = lastRaw?.distances ?? {};
   debugText.textContent = [
     `mode       ${mode}${calibration ? '' : '（未キャリブレーション）'}`,
+    `顔認識     ${trackerDiagnostics()}`,
     `face       ${f?.faceFound ?? '-'}`,
     `bs  x,y    ${f ? fmt(f.feature[0]) + fmt(f.feature[1]) : '-'}`,
     `iris x,y   ${f ? fmt(f.feature[2]) + fmt(f.feature[3]) : '-'}`,

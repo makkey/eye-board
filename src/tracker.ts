@@ -29,10 +29,18 @@ export class Tracker {
   private running = false;
   private smoothed: Feature | null = null;
   private lastVideoTime = -1;
+  private lastTs = 0;
+  private recreating = false;
 
   /** 0〜1。1 = 平滑化なし */
   smoothing = 0.5;
   onFrame: (f: TrackerFrame) => void = () => {};
+
+  /** 診断用：使っている処理装置、処理したフレーム数、直近のエラー */
+  delegate: 'GPU' | 'CPU' = 'GPU';
+  frames = 0;
+  lastFrameAt = 0;
+  lastError: string | null = null;
 
   constructor(video: HTMLVideoElement) {
     this.video = video;
@@ -49,27 +57,18 @@ export class Tracker {
 
     if (!this.landmarker) {
       onStatus('顔認識モデルを読み込み中…');
-      const fileset = { wasmLoaderPath, wasmBinaryPath };
-      const options = {
-        runningMode: 'VIDEO' as const,
-        numFaces: 1,
-        outputFaceBlendshapes: true,
-      };
       try {
-        this.landmarker = await FaceLandmarker.createFromOptions(fileset, {
-          ...options,
-          baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
-        });
-      } catch {
-        this.landmarker = await FaceLandmarker.createFromOptions(fileset, {
-          ...options,
-          baseOptions: { modelAssetPath: MODEL_URL, delegate: 'CPU' },
-        });
+        this.landmarker = await createLandmarker('GPU');
+        this.delegate = 'GPU';
+      } catch (e) {
+        this.lastError = `GPU: ${(e as Error).message}`;
+        this.landmarker = await createLandmarker('CPU');
+        this.delegate = 'CPU';
       }
     }
     onStatus('');
     this.running = true;
-    this.loop();
+    this.schedule();
   }
 
   stop() {
@@ -82,26 +81,73 @@ export class Tracker {
     return this.running;
   }
 
-  private loop = () => {
-    if (!this.running) return;
+  private schedule() {
+    if (this.running) requestAnimationFrame(this.tick);
+  }
+
+  private tick = () => {
+    // 例外で処理が止まらないよう、次のフレームの予約を先に済ませる
+    this.schedule();
     const v = this.video;
-    if (this.landmarker && v.readyState >= 2 && v.currentTime !== this.lastVideoTime) {
-      this.lastVideoTime = v.currentTime;
-      const t = performance.now();
-      const res = this.landmarker.detectForVideo(v, t);
-      const lm = res.faceLandmarks[0];
-      const bs = res.faceBlendshapes[0]?.categories;
-      if (lm && bs) {
-        const raw = extractFeature(lm, bs, v.videoWidth / v.videoHeight);
-        const a = this.smoothing;
-        this.smoothed = this.smoothed ? raw.map((x, i) => a * x + (1 - a) * this.smoothed![i]) : raw;
-        this.onFrame({ t, faceFound: true, feature: this.smoothed, landmarks: lm });
-      } else {
-        this.onFrame({ t, faceFound: false, feature: this.smoothed ?? [0, 0, 0, 0, 0, 0] });
-      }
+    if (!this.landmarker || this.recreating || v.readyState < 2) return;
+    // 新しいフレームだけ処理する。ただし currentTime が進まないブラウザもあるので、一定時間ごとにも処理する
+    const now = performance.now();
+    if (v.currentTime === this.lastVideoTime && now - this.lastTs < 100) return;
+    this.lastVideoTime = v.currentTime;
+    // MediaPipe は単調増加のタイムスタンプを要求する
+    const t = Math.max(now, this.lastTs + 1);
+    this.lastTs = t;
+    try {
+      this.process(t);
+    } catch (e) {
+      this.lastError = `${this.delegate}: ${(e as Error).message}`;
+      console.error(e);
+      // スマホの GPU では作成できても推論で失敗することがあるので、CPU に切り替える
+      if (this.delegate === 'GPU') void this.fallbackToCpu();
     }
-    requestAnimationFrame(this.loop);
   };
+
+  private async fallbackToCpu() {
+    this.recreating = true;
+    try {
+      this.landmarker?.close();
+      this.landmarker = await createLandmarker('CPU');
+      this.delegate = 'CPU';
+    } catch (e) {
+      this.lastError = `CPU: ${(e as Error).message}`;
+    } finally {
+      this.recreating = false;
+    }
+  }
+
+  private process(t: number) {
+    const v = this.video;
+    const res = this.landmarker!.detectForVideo(v, t);
+    this.frames++;
+    this.lastFrameAt = t;
+    const lm = res.faceLandmarks[0];
+    const bs = res.faceBlendshapes[0]?.categories;
+    if (lm && bs) {
+      const raw = extractFeature(lm, bs, v.videoWidth / v.videoHeight);
+      const a = this.smoothing;
+      this.smoothed = this.smoothed ? raw.map((x, i) => a * x + (1 - a) * this.smoothed![i]) : raw;
+      this.onFrame({ t, faceFound: true, feature: this.smoothed, landmarks: lm });
+    } else {
+      this.onFrame({ t, faceFound: false, feature: this.smoothed ?? [0, 0, 0, 0, 0, 0] });
+    }
+  }
+}
+
+function createLandmarker(delegate: 'GPU' | 'CPU') {
+  return FaceLandmarker.createFromOptions(
+    { wasmLoaderPath, wasmBinaryPath },
+    {
+      runningMode: 'VIDEO',
+      numFaces: 1,
+      outputFaceBlendshapes: true,
+      baseOptions: { modelAssetPath: MODEL_URL, delegate },
+    },
+  );
 }
 
 export function extractFeature(
