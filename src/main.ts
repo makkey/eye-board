@@ -283,7 +283,9 @@ async function startConversion(more: boolean) {
   renderKeyboard();
   const model = settings.aiModel.trim() || DEFAULT_MODELS[settings.aiProvider];
   try {
-    const generate = providerGenerate(settings.aiProvider, key, model, settings.aiEffort);
+    // 「別の候補」は、外れて聞き直している場面なので、考える深さを1段上げる（速さより当たりを優先）
+    const effort = more ? deeper(settings.aiEffort) : settings.aiEffort;
+    const generate = providerGenerate(settings.aiProvider, key, model, effort);
     // 文頭は文脈が無く外れやすいので、少なくとも2回聞いて候補を広げる（同時に聞くので待ち時間はほぼ同じ）
     const runs = atSentenceStart(text) ? Math.max(2, settings.aiRuns) : settings.aiRuns;
     const heads = pendingHeads();
@@ -336,6 +338,12 @@ async function startConversion(more: boolean) {
     say(t('jv.error', { msg: (e as Error).message }));
   }
   renderKeyboard();
+}
+
+/** 考える深さを1段上げる（モデルの既定と high はそのまま） */
+function deeper(e: AiEffort): AiEffort {
+  const next: Partial<Record<AiEffort, AiEffort>> = { minimal: 'low', low: 'medium', medium: 'high' };
+  return next[e] ?? e;
 }
 
 /** 変換候補を ← ↖ ↑ ↗ → に並べた2段目（1番目の候補が ←） */
