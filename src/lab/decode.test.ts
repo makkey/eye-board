@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PROMPTS, judge } from './decode';
+import { PROMPTS, judge, mergeRuns } from './decode';
 import { toVowels } from './vowels';
 
 describe('judge', () => {
@@ -61,6 +61,21 @@ describe('途中で切れた返答', () => {
 
   it('候補が1つも読めなければエラー', () => {
     expect(() => judge('{"candidates": [{"reading": "こ', 'お', '', '')).toThrow();
+  });
+});
+
+describe('mergeRuns', () => {
+  const run = (...readings: string[]) =>
+    judge(JSON.stringify({ candidates: readings.map((r) => ({ reading: r, text: r })) }), 'あうい', 'さむい', 'さむい', true);
+
+  it('何回かの返答で上位に多く出た候補を先にする', () => {
+    const m = mergeRuns([run('あつい', 'さむい'), run('さむい', 'かゆい'), run('さむい', 'あつい')], true);
+    expect(m.map((c) => c.reading)).toEqual(['さむい', 'あつい', 'かゆい']);
+  });
+
+  it('母音が合わない候補は点が高くても後ろ', () => {
+    const m = mergeRuns([run('さむいです', 'あつい'), run('さむいです', 'あつい')], true);
+    expect(m.map((c) => c.reading)).toEqual(['あつい', 'さむいです']);
   });
 });
 

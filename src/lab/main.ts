@@ -1,7 +1,7 @@
 import '../style.css';
 import './lab.css';
 import { DEFAULT_SENTENCES, parseSentences } from './dataset';
-import { PROMPTS, TOP_N, judge, segmentPrompt, sentencePrompt } from './decode';
+import { PROMPTS, TOP_N, judge, mergeRuns, segmentPrompt, sentencePrompt } from './decode';
 import type { Candidate, PromptId, PromptVersion } from './decode';
 import { PROVIDERS, setSarashinaRelay } from './providers';
 import type { Effort, ProviderId } from './providers';
@@ -158,7 +158,6 @@ promptSelect.onchange = () => {
 };
 showPrompt();
 
-/** 1回問い合わせて、かかった時間と返答を返す */
 /** 問い合わせ先（まとめて測る時は、実行中に画面を切り替えられても同じ設定で通す） */
 interface Target {
   provider: ProviderId;
@@ -166,17 +165,51 @@ interface Target {
   model: string;
   effort: Effort;
   prompt: PromptVersion;
+  /** 同時に聞く回数 */
+  runs: number;
 }
 
 function currentTarget(): Target {
-  return { provider: providerId, key: requireKey(), model: currentModel(), effort: effort(), prompt: promptVersion() };
+  const runs = Number($<HTMLSelectElement>('runs').value) || 1;
+  return { provider: providerId, key: requireKey(), model: currentModel(), effort: effort(), prompt: promptVersion(), runs };
 }
 
-/** 1回問い合わせて、かかった時間と返答を返す */
-async function ask(user: string, t: Target): Promise<{ raw: string; ms: number }> {
+const runsSelect = $<HTMLSelectElement>('runs');
+runsSelect.value = store.get('runs') ?? '1';
+if (!runsSelect.value) runsSelect.value = '1';
+runsSelect.onchange = () => store.set('runs', runsSelect.value);
+
+interface Answer {
+  /** 全候補（何回か聞いた時は合算した順位） */
+  all: Candidate[];
+  /** 各回で受け取った候補の数の合計と、そのうち母音が合う数 */
+  received: number;
+  receivedValid: number;
+  /** 全部の返答がそろうまでの時間 */
+  ms: number;
+  raws: string[];
+}
+
+/** t.runs 回同時に問い合わせて採点する。一部が失敗しても、返ってきた分で決める */
+async function ask(user: string, vowels: string, goldReading: string, goldText: string, t: Target): Promise<Answer> {
   const start = performance.now();
-  const raw = await PROVIDERS[t.provider].generate(t.key, t.model, t.prompt.system, t.prompt.schema, user, t.effort);
-  return { raw, ms: performance.now() - start };
+  const settled = await Promise.allSettled(
+    Array.from({ length: t.runs }, () => PROVIDERS[t.provider].generate(t.key, t.model, t.prompt.system, t.prompt.schema, user, t.effort)),
+  );
+  const ms = performance.now() - start;
+  const raws = settled.flatMap((s) => (s.status === 'fulfilled' ? [s.value] : []));
+  const runs: Candidate[][] = [];
+  let firstError: unknown = settled.find((s) => s.status === 'rejected')?.reason;
+  for (const raw of raws) {
+    try {
+      runs.push(judge(raw, vowels, goldReading, goldText, t.prompt.validFirst));
+    } catch (e) {
+      firstError ??= e;
+    }
+  }
+  if (!runs.length) throw firstError;
+  const flat = runs.flat();
+  return { all: mergeRuns(runs, t.prompt.validFirst), received: flat.length, receivedValid: flat.filter((c) => c.valid).length, ms, raws };
 }
 
 // ---- 試し入力 ----
@@ -205,17 +238,16 @@ $('btn-try').onclick = async () => {
   // 返ってくるまで数秒〜数十秒かかるので、経過時間を出しておく
   const btn = $<HTMLButtonElement>('btn-try');
   btn.disabled = true;
-  const label = `${PROVIDERS[target.provider].label}: ${target.model}（指示文 ${target.prompt.id}）`;
+  const label = `${PROVIDERS[target.provider].label}: ${target.model}（指示文 ${target.prompt.id}${target.runs > 1 ? `・${target.runs}回` : ''}）`;
   const started = performance.now();
   const tick = () => (status.textContent = `${label} に問い合わせ中…（${((performance.now() - started) / 1000).toFixed(0)}秒）送った母音：${vowels}`);
   tick();
   const timer = setInterval(tick, 500);
   try {
     const user = context ? segmentPrompt(context, vowels) : sentencePrompt(vowels);
-    const { raw, ms } = await ask(user, target);
-    $('try-raw').textContent = raw;
+    const { all, raws, ms } = await ask(user, vowels, '', '', target);
+    $('try-raw').textContent = raws.join('\n\n');
     $('try-raw-box').hidden = false;
-    const all = judge(raw, vowels, '', '', target.prompt.validFirst);
     const cands = all.slice(0, TOP_N);
     const dropped = all.length - cands.length;
     status.textContent = `${label}　${(ms / 1000).toFixed(1)}秒　送った母音：${vowels}` + (dropped > 0 ? `　（ほかに ${dropped} 候補を省略）` : '');
@@ -371,12 +403,11 @@ async function runTasks(rs: TaskResult[], target: Target) {
     while (!stopRequested && next < rs.length) {
       const r = rs[next++];
       try {
-        const { raw, ms } = await ask(r.user, target);
-        r.ms = ms;
-        const all = judge(raw, r.vowels, r.goldReading, r.goldText, target.prompt.validFirst);
-        r.candidates = all.slice(0, TOP_N);
-        r.received = all.length;
-        r.receivedValid = all.filter((c) => c.valid).length;
+        const a = await ask(r.user, r.vowels, r.goldReading, r.goldText, target);
+        r.ms = a.ms;
+        r.candidates = a.all.slice(0, TOP_N);
+        r.received = a.received;
+        r.receivedValid = a.receivedValid;
       } catch (e) {
         r.error = (e as Error).message;
       }
@@ -423,7 +454,7 @@ function summarize(t: Target, mode: string, rs: TaskResult[]): Summary {
   // 割合はエラーにならなかった問いの中で数える（混雑や回数制限で精度が低く見えないように）
   const n = ok.length || 1;
   return {
-    model: `${PROVIDERS[t.provider].label}: ${t.model}${effortLabel} / 指示文 ${t.prompt.id}`,
+    model: `${PROVIDERS[t.provider].label}: ${t.model}${effortLabel} / 指示文 ${t.prompt.id}${t.runs > 1 ? ` / ${t.runs}回合算` : ''}`,
     mode: modeLabel,
     n: rs.length,
     top1: ok.filter((r) => r.candidates[0]?.correct).length / n,

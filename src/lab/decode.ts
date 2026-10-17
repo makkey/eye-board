@@ -138,6 +138,28 @@ export function judge(raw: string, inputVowels: string, goldReading: string, gol
   return [...unique.filter((c) => c.valid), ...unique.filter((c) => !c.valid)];
 }
 
+/**
+ * 同じ問いを何回か聞いた結果を1つの順位にまとめる（返答は毎回少しずつ違うため）。
+ * 読みが同じ候補は1つにまとめ、各回の順位に応じた点（1位 10点、2位 9点…）の合計で並べる。
+ * validFirst の時は母音が合う候補を先に置く。
+ */
+export function mergeRuns(runs: Candidate[][], validFirst: boolean): Candidate[] {
+  if (runs.length === 1) return runs[0];
+  const merged = new Map<string, { c: Candidate; score: number; first: number }>();
+  let order = 0;
+  for (const run of runs) {
+    run.forEach((c, i) => {
+      const k = compact(c.reading) || compact(c.text);
+      const m = merged.get(k);
+      if (m) m.score += Math.max(1, 10 - i);
+      else merged.set(k, { c, score: Math.max(1, 10 - i), first: order++ });
+    });
+  }
+  return [...merged.values()]
+    .sort((a, b) => (validFirst ? Number(b.c.valid) - Number(a.c.valid) : 0) || b.score - a.score || a.first - b.first)
+    .map((m) => m.c);
+}
+
 type RawCandidates = { candidates?: { text?: string; reading?: string }[] };
 
 /**
