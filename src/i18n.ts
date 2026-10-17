@@ -25,7 +25,14 @@ const JA = {
   <li>文字を選ぶ：<b>左から時計回りに あ・い・う・え・お</b>（← ↖ ↑ ↗ →）。見て戻ると確定。</li>
   <li>何も選ばずに戻る：2段目で<b>目を閉じる（下を見る）</b>。5秒何もしなくても戻ります。</li>
 </ol>
-<p>右上の「言語」で英語に切り替えられます。</p>
+<p>右上の「言語」で、日本語（12キー）→ 日本語（母音入力）→ 英語 の順に切り替わります。</p>
+<p><b>母音入力</b>：各拍の母音だけを入れ、文節ごとに AI が漢字かな交じりに変換します（例：「きのうは」→ い・お・う・あ）。</p>
+<ol>
+  <li>← あ・↖ い・↑ う・↗ え・→ お を見て戻ると1拍入ります。ん は ↖ を2秒。っ は次の音の母音、ー は前の音の母音で入れます（とって → お・え・え）。</li>
+  <li>1文節（「昨日は」など）入れたら<b>目を閉じる</b>と変換。候補が ← ↖ ↑ ↗ → に並ぶので、見て戻ると確定します。目を閉じると入力にもどります。</li>
+  <li>← を2秒で編集（続けて ← で1拍削除）、目を閉じ続けると記号（、。？！改行）。</li>
+  <li>設定で AI の会社と API キーを入れて使います（キーはこのブラウザだけに保存）。</li>
+</ol>
 <p>シミュレーション：<kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd>/<kbd>A</kbd><kbd>D</kbd>（または矢印キー）を押している間その方向を見ている扱い、<kbd>Space</kbd>（または<kbd>X</kbd>・<kbd>↓</kbd>）で目を閉じる。</p>
 <p>映像は端末内でのみ処理され、送信されません。</p>`,
   'start.desc': '目を大きく動かして、12キー配列でひらがなを入力します。<br />画面から目をそらして使うので、<b>音声の案内</b>を聞きながら操作します。',
@@ -114,6 +121,35 @@ const JA = {
   'say.back': 'もどる',
   'say.empty': '何も入力されていません',
   'lang.name': '日本語',
+  'nav.langVowel': '入力: 母音（AI変換）',
+  'lang.nameVowel': '母音入力',
+  'set.aiSection': '母音入力（AI 変換）',
+  'set.jaInput': '日本語の入力方式',
+  'set.jaInput.kana': '12キー（行と段を選ぶ）',
+  'set.jaInput.vowel': '母音入力（AI が変換）',
+  'set.aiProvider': 'AI の会社',
+  'set.aiModel': 'モデル',
+  'set.aiKey': 'API キー',
+  'set.aiKeyNote': 'API キーはこのブラウザの中だけに保存され（母音ラボと共通）、選んだ会社の API に直接送られます。変換のたびに API の利用料金がかかります。',
+  'set.aiEffort': '考える深さ（浅いほど速い）',
+  'set.aiEffort.default': 'モデルの既定',
+  'set.aiRuns': '同時に聞く回数（多いほど安定・料金は回数倍）',
+  'jv.chooseVowel': '母音を入力',
+  'jv.chooseVowelSub': '← あ ↖ い ↑ う ↗ え → お　／　目を閉じる → 変換',
+  'jv.pending': '入力中：{v}',
+  'jv.waiting': '変換中…',
+  'jv.waitingSub': '目を閉じる（下を見る）→ やめる',
+  'jv.choose': '候補を選ぶ',
+  'jv.chooseSub': '← ↖ ↑ ↗ → を見て戻る　／　目を閉じる（下を見る）→ 入力にもどる',
+  'jv.candidates': '候補',
+  'jv.candidatesSay': '候補。{first}',
+  'jv.noVowels': '母音が入力されていません',
+  'jv.noKey': 'API キーが設定されていません。設定から入力してください',
+  'jv.noCandidates': '候補が見つかりませんでした',
+  'jv.error': '変換できませんでした（{msg}）',
+  'jv.convertFirst': '先に変換してください',
+  'jv.cancelled': '変換をやめました',
+  'jv.backToInput': '入力にもどる',
 };
 
 export type TextKey = keyof typeof JA;
@@ -232,6 +268,35 @@ const EN: Record<TextKey, string> = {
   'say.back': 'back',
   'say.empty': 'nothing typed',
   'lang.name': 'English',
+  'nav.langVowel': 'Input: Japanese vowels (AI)',
+  'lang.nameVowel': 'Japanese vowel input',
+  'set.aiSection': 'Japanese vowel input (AI conversion)',
+  'set.jaInput': 'Japanese input method',
+  'set.jaInput.kana': '12-key (row, then vowel)',
+  'set.jaInput.vowel': 'Vowels only (AI converts)',
+  'set.aiProvider': 'AI provider',
+  'set.aiModel': 'Model',
+  'set.aiKey': 'API key',
+  'set.aiKeyNote': 'The API key is stored only in this browser (shared with the vowel lab) and sent directly to the chosen provider. Each conversion is billed by the provider.',
+  'set.aiEffort': 'Thinking depth (lower is faster)',
+  'set.aiEffort.default': 'Model default',
+  'set.aiRuns': 'Parallel requests (steadier, costs more)',
+  'jv.chooseVowel': 'Enter vowels',
+  'jv.chooseVowelSub': '← a ↖ i ↑ u ↗ e → o · Close eyes → convert',
+  'jv.pending': 'Typing: {v}',
+  'jv.waiting': 'Converting…',
+  'jv.waitingSub': 'Close eyes (look down) → stop',
+  'jv.choose': 'Choose a candidate',
+  'jv.chooseSub': 'Look ← ↖ ↑ ↗ →, then back · Close eyes (look down) → back to input',
+  'jv.candidates': 'Candidates',
+  'jv.candidatesSay': 'Candidates. {first}',
+  'jv.noVowels': 'No vowels entered',
+  'jv.noKey': 'No API key. Enter one in Settings',
+  'jv.noCandidates': 'No candidates found',
+  'jv.error': 'Could not convert ({msg})',
+  'jv.convertFirst': 'Convert first',
+  'jv.cancelled': 'Conversion stopped',
+  'jv.backToInput': 'Back to input',
 };
 
 const TEXTS: Record<Lang, Record<TextKey, string>> = { ja: JA, en: EN };

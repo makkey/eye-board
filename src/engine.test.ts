@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { InputEngine } from './engine';
-import { EN_KEYMAP, JA_KEYMAP, itemLabel } from './layout';
+import { EN_KEYMAP, JA_KEYMAP, VOWEL_KEYMAP, itemLabel } from './layout';
 import { DEFAULT_SETTINGS } from './settings';
-import type { Dir } from './types';
+import type { Dir, Row } from './types';
 
 // 時間の組み立てを読みやすくするため、テストでは候補になるまでを 400ms に固定する
 const SETTINGS = { ...DEFAULT_SETTINGS, selectMs: 400 };
@@ -310,5 +310,66 @@ describe('InputEngine（英語）', () => {
       ['C', 300],
     ]);
     expect(log).toEqual(['⌫Del']);
+  });
+});
+
+describe('InputEngine（母音入力）', () => {
+  it('方向を見て戻ると、2段目に入らずその母音が入る', () => {
+    const { log, rows, engine } = run(
+      [
+        ['C', 300],
+        ['L', 600],
+        ['C', 300],
+        ['UR', 600],
+        ['C', 300],
+      ],
+      VOWEL_KEYMAP,
+    );
+    expect(log).toEqual(['あ', 'え']);
+    expect(rows).toEqual([]);
+    expect(engine.stage).toBe('row');
+  });
+
+  it('↖ を2秒で ん、長押しの無い方向は見続けても母音のまま', () => {
+    expect(run([['C', 300], ['UL', 2200], ['C', 300]], VOWEL_KEYMAP).log).toEqual(['ん']);
+    expect(run([['C', 300], ['U', 2200], ['C', 300]], VOWEL_KEYMAP).log).toEqual(['う']);
+  });
+
+  it('目を閉じると変換、閉じ続けると変換を取り消して記号へ', () => {
+    expect(run([['C', 300], ['closed', 800], ['C', 300]], VOWEL_KEYMAP).log).toEqual(['変換']);
+    const long = run([['C', 300], ['closed', 2300], ['C', 300]], VOWEL_KEYMAP);
+    expect(long.log).toEqual(['変換', 'retract:変換']);
+    expect(long.rows).toEqual(['jv-kigo']);
+  });
+
+  it('外から開いた候補の行は、見て戻ると選べて、目を閉じるともどる。放っておいても戻らない', () => {
+    const cands: Row = {
+      id: 'cand',
+      label: '候補',
+      speak: '候補',
+      items: [{ kind: 'char', ch: '昨日は' }, { kind: 'char', ch: '希望は' }, null, null, null],
+      noIdle: true,
+    };
+    const log: string[] = [];
+    const engine = new InputEngine(SETTINGS, { commit: (i) => log.push(itemLabel(i)), cancel: (r) => log.push(`cancel:${r}`) }, VOWEL_KEYMAP);
+    let t = 0;
+    const feed = (what: Dir | 'closed', ms: number) => {
+      for (let i = 0; i < ms; i += 10, t += 10) {
+        engine.update({ t, faceFound: true, dir: what === 'closed' ? 'C' : what, closed: what === 'closed' });
+      }
+    };
+    feed('C', 300);
+    engine.openRow(cands, t);
+    feed('C', 8000); // 放っておいても戻らない
+    expect(engine.stage).toBe('char');
+    feed('UL', 600);
+    feed('C', 300);
+    expect(log).toEqual(['希望は']);
+
+    engine.openRow(cands, t);
+    feed('closed', 800);
+    feed('C', 300);
+    expect(log).toEqual(['希望は', 'cancel:close']);
+    expect(engine.stage).toBe('row');
   });
 });

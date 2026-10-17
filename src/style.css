@@ -304,6 +304,13 @@ button[aria-pressed='true'] {
 .stage-char .cell:not(.empty, .back) .main.small {
   font-size: clamp(1rem, 4.5vw, 1.5rem);
 }
+/* 母音入力の変換候補（「楽しかったね」のように長いことがある） */
+.stage-char .cell:not(.empty, .back) .main.cand {
+  font-size: clamp(0.8rem, 3.6vw, 1.15rem);
+  letter-spacing: 0;
+  text-align: center;
+  word-break: break-all;
+}
 .hover {
   background: var(--hover);
 }
@@ -425,4 +432,20 @@ dialog h2 {
   width: 7em;
   font: inherit;
   padding: 4px 6px;
+}
+.settings-fields h3 {
+  margin: 12px 0 0;
+  font-size: 1rem;
+}
+.settings-fields select,
+.settings-fields input:not([type='number']):not([type='checkbox']) {
+  font: inherit;
+  padding: 4px 6px;
+  min-width: 0;
+  max-width: 60%;
+}
+.settings-fields .note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
 }

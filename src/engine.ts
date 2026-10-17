@@ -235,8 +235,9 @@ export class InputEngine {
       if (!this.candidate && held >= s.selectMs) {
         this.setRowCandidate(this.keymap.rowByDir[this.dir as SideDir], false);
       }
-      if (held >= s.longMs && this.candidate?.kind === 'row' && !this.candidate.long) {
-        this.setRowCandidate(this.keymap.longRowByDir[this.dir as SideDir], true);
+      const longRow = this.keymap.longRowByDir[this.dir as SideDir];
+      if (longRow && held >= s.longMs && this.candidate?.kind === 'row' && !this.candidate.long) {
+        this.setRowCandidate(longRow, true);
       }
       return;
     }
@@ -250,7 +251,7 @@ export class InputEngine {
   }
 
   private updateIdle(t: number) {
-    if (this.stage !== 'char' || this.dir !== 'C' || this.candidate) return;
+    if (this.stage !== 'char' || this.row?.noIdle || this.dir !== 'C' || this.candidate) return;
     if (t - this.lastActivity >= this.settings.idleMs) this.cancel('idle');
   }
 
@@ -263,8 +264,27 @@ export class InputEngine {
     const cand = this.candidate;
     this.candidate = null;
     if (!cand) return;
-    if (cand.kind === 'row') this.enterChar(cand.row, t);
-    else this.commitItem(cand.item);
+    if (cand.kind === 'row') {
+      if (cand.row.direct) this.commitItem(cand.row.direct);
+      else this.enterChar(cand.row, t);
+    } else this.commitItem(cand.item);
+  }
+
+  /**
+   * 外から2段目を開く（母音入力の「変換中」や変換候補）。
+   * 開いた時点で見ている方向の時間は数え直す（すぐに候補が選ばれないように）
+   */
+  openRow(row: Row, t: number) {
+    this.held = 0;
+    this.enterChar(row, t);
+  }
+
+  /** 外から1段目へ戻す（イベントは出さない） */
+  leaveRow() {
+    this.stage = 'row';
+    this.row = null;
+    this.candidate = null;
+    this.held = 0;
   }
 
   private enterChar(row: Row, t: number) {

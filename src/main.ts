@@ -7,14 +7,15 @@ import { InputEngine } from './engine';
 import { Feedback } from './feedback';
 import { applyEnglish } from './english';
 import { applyItem } from './kana';
-import { KEYMAPS, flowerIndex, itemLabel, itemSpeech } from './layout';
+import { flowerIndex, itemLabel, itemSpeech, keymapFor } from './layout';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './settings';
 import { Tracker } from './tracker';
 import type { TrackerFrame } from './tracker';
 import { applyStaticTexts, className, dirName, setLang, t } from './i18n';
 import type { TextKey } from './i18n';
-import { ALL_CLASSES, ALL_DIRS, DIR_ARROW } from './types';
-import type { Dir, GazeClass, Item, Row, Settings, SideDir } from './types';
+import { ALL_CLASSES, ALL_DIRS, DIR_ARROW, FLOWER_DIRS } from './types';
+import type { AiEffort, AiProvider, Dir, GazeClass, Item, JaInput, Row, Settings, SideDir } from './types';
+import { DEFAULT_MODELS, PROVIDER_LABELS, convertPhrase, loadKey, providerGenerate, saveKey } from './vowelime';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -34,6 +35,18 @@ let spokenItem: Item | null = null;
 let spokenRow: Row | null = null;
 const trail: number[][] = [];
 
+// ---- 母音入力の状態 ----
+/** 入力中の文節の母音（まだ変換していない） */
+let vowels = '';
+/** idle：母音を入力中、waiting：AI に問い合わせ中、choosing：候補を選んでいる */
+let conv: 'idle' | 'waiting' | 'choosing' = 'idle';
+/** 問い合わせごとの番号（やめた・やり直した問い合わせの返事を無視するため） */
+let convToken = 0;
+/** しばらく案内欄に出すお知らせ（エラーなど） */
+let notice: { text: string; until: number } | null = null;
+const VOWEL_CHARS = new Set([...'あいうえおん']);
+const isVowelMode = () => engine.keymap.id === 'jv';
+
 const feedback = new Feedback(settings);
 const tracker = new Tracker($<HTMLVideoElement>('video'));
 tracker.smoothing = settings.smoothing;
@@ -44,6 +57,8 @@ setLang(settings.lang);
 const engine = new InputEngine(settings, {
   rowCandidate(row, long) {
     spokenRow = row;
+    // 母音などその場で入るキーは、確定した時にもう一度読み上げない
+    spokenItem = row.direct ?? null;
     feedback.play(long ? 'long' : 'select');
     void feedback.say(row.speak);
   },
@@ -68,14 +83,27 @@ const engine = new InputEngine(settings, {
   cancel(reason) {
     spokenItem = spokenRow = null;
     feedback.play('cancel');
-    void feedback.say(t(reason === 'idle' ? 'say.cancel' : 'say.back'));
+    if (conv !== 'idle') {
+      // 変換中・候補から、目を閉じて入力にもどった（入れた母音はそのまま）
+      void feedback.say(t(conv === 'waiting' ? 'jv.cancelled' : 'jv.backToInput'));
+      conv = 'idle';
+      convToken++;
+    } else {
+      void feedback.say(t(reason === 'idle' ? 'say.cancel' : 'say.back'));
+    }
     renderKeyboard();
   },
-  retract() {
+  retract(item) {
+    if (item.kind === 'action' && item.action === 'convert') {
+      // 変換しようとしたが、閉じ続けて記号に切り替えた：問い合わせはやめる
+      conv = 'idle';
+      convToken++;
+      return;
+    }
     // 目を閉じて入れたスペースを、閉じ続けて記号に切り替えたので取り消す
     undo();
   },
-}, KEYMAPS[settings.lang]);
+}, keymapFor(settings.lang, settings.jaInput));
 
 // ---- テキスト ----
 const textEl = $<HTMLTextAreaElement>('text');
@@ -85,11 +113,25 @@ function setText(next: string) {
   undoStack.push(text);
   if (undoStack.length > 200) undoStack.shift();
   text = next;
-  textEl.value = text;
+  renderText();
+}
+
+/** 入力中の母音は［ ］で後ろに付けて見せる（本文・コピーには入れない） */
+function renderText() {
+  textEl.value = text + (vowels ? `［${vowels}］` : '');
   textEl.scrollTop = textEl.scrollHeight;
 }
 
+function setVowels(next: string) {
+  vowels = next;
+  renderText();
+}
+
 function applyToText(item: Item) {
+  if (isVowelMode()) {
+    applyVowelItem(item);
+    return;
+  }
   if (item.kind === 'action' && item.action === 'speak') {
     void feedback.say(text || t('say.empty'), true);
     return;
@@ -104,7 +146,108 @@ function applyToText(item: Item) {
 function undo() {
   if (!undoStack.length) return;
   text = undoStack.pop()!;
-  textEl.value = text;
+  renderText();
+}
+
+// ---- 母音入力 ----
+
+function applyVowelItem(item: Item) {
+  if (conv === 'choosing' && item.kind === 'char') {
+    // 変換候補を選んだ：文節を確定して、次の文節の入力へ
+    conv = 'idle';
+    vowels = '';
+    setText(text + item.ch);
+    renderText();
+    return;
+  }
+  if (item.kind === 'char') {
+    if (VOWEL_CHARS.has(item.ch)) setVowels(vowels + item.ch);
+    else if (vowels) say(t('jv.convertFirst'));
+    else setText(text + item.ch);
+    return;
+  }
+  switch (item.action) {
+    case 'convert':
+      void startConversion();
+      return;
+    case 'backspace':
+      // 入力中の母音があればそれを1つ消す
+      if (vowels) setVowels([...vowels].slice(0, -1).join(''));
+      else setText(applyItem(text, item));
+      return;
+    case 'clear':
+      setVowels('');
+      setText('');
+      return;
+    case 'speak':
+      void feedback.say(text + vowels || t('say.empty'), true);
+      return;
+    case 'undo':
+      undo();
+      return;
+    default:
+      if (vowels) say(t('jv.convertFirst'));
+      else setText(applyItem(text, item));
+  }
+}
+
+function say(msg: string) {
+  notice = { text: msg, until: performance.now() + 5000 };
+  void feedback.say(msg, true);
+}
+
+/** 「変換中」の間の2段目（選べるものはない。目を閉じるとやめる） */
+const WAIT_ROW: Row = { id: 'jv-wait', label: t('jv.waiting'), speak: '', items: [null, null, null, null, null], noIdle: true };
+
+async function startConversion() {
+  if (!vowels) {
+    say(t('jv.noVowels'));
+    return;
+  }
+  const key = loadKey(settings.aiProvider);
+  if (!key) {
+    say(t('jv.noKey'));
+    return;
+  }
+  const token = ++convToken;
+  conv = 'waiting';
+  notice = null;
+  engine.openRow({ ...WAIT_ROW, label: t('jv.waiting') }, performance.now());
+  renderKeyboard();
+  const model = settings.aiModel.trim() || DEFAULT_MODELS[settings.aiProvider];
+  try {
+    const cands = await convertPhrase(
+      text,
+      vowels,
+      providerGenerate(settings.aiProvider, key, model, settings.aiEffort),
+      settings.aiRuns,
+    );
+    if (token !== convToken) return;
+    if (!cands.length) {
+      conv = 'idle';
+      engine.leaveRow();
+      renderKeyboard();
+      feedback.play('cancel');
+      say(t('jv.noCandidates'));
+      return;
+    }
+    conv = 'choosing';
+    engine.openRow(candidateRow(cands, token), performance.now());
+  } catch (e) {
+    if (token !== convToken) return;
+    console.error(e);
+    conv = 'idle';
+    engine.leaveRow();
+    feedback.play('cancel');
+    say(t('jv.error', { msg: (e as Error).message }));
+  }
+  renderKeyboard();
+}
+
+/** 変換候補を ← ↖ ↑ ↗ → に並べた2段目（1番目の候補が ←） */
+function candidateRow(cands: string[], token: number): Row {
+  const items = FLOWER_DIRS.map((_, i) => (cands[i] ? ({ kind: 'char', ch: cands[i] } as Item) : null));
+  return { id: `jv-cand-${token}`, label: t('jv.candidates'), speak: t('jv.candidatesSay', { first: cands[0] }), items, noIdle: true };
 }
 
 $('btn-speak').onclick = () => void feedback.say(text || t('say.empty'), true);
@@ -141,7 +284,7 @@ function rowSub(row: Row): string {
 let renderedStage = '';
 
 function renderKeyboard() {
-  const key = `${engine.keymap.lang}:` + (engine.stage === 'row' ? 'row' : `char:${engine.row?.id}`);
+  const key = `${engine.keymap.id}:` + (engine.stage === 'row' ? 'row' : `char:${engine.row?.id}`);
   if (key === renderedStage) return;
   renderedStage = key;
   keyboardEl.innerHTML = '';
@@ -155,11 +298,11 @@ function renderKeyboard() {
       } else if (pos === 'close') {
         const cs = km.closeShort;
         const label = cs.kind === 'row' ? cs.row.label : itemLabel(cs.item);
-        const sub = cs.kind === 'row' ? rowSub(cs.row) : closeShortName();
+        const sub = cs.kind === 'row' ? rowSub(cs.row) : cs.item.kind === 'char' ? closeShortName() : '';
         keyboardEl.append(keyEl('close', label, sub, km.closeLong.label, t('key.closeHint')));
       } else {
         const row = km.rowByDir[pos];
-        keyboardEl.append(keyEl(pos, row.label, rowSub(row), km.longRowByDir[pos].label, DIR_ARROW[pos]));
+        keyboardEl.append(keyEl(pos, row.label, rowSub(row), km.longRowByDir[pos]?.label, DIR_ARROW[pos]));
       }
     }
     return;
@@ -186,29 +329,32 @@ function renderKeyboard() {
       cell.className = item ? 'cell' : 'cell empty';
       cell.id = `cell-${pos}`;
       const label = item ? itemLabel(item) : '';
-      // 「゛゜小」「⌫削除」のような長いラベルは小さめに
-      const cls = [...label].length > 2 ? 'main small' : 'main';
+      // 「゛゜小」「⌫削除」のような長いラベルは小さめに。変換候補はさらに長いことがある
+      const len = [...label].length;
+      const cls = len > 4 ? 'main small cand' : len > 2 ? 'main small' : 'main';
       cell.innerHTML = `<span class="hint">${DIR_ARROW[pos]}</span><span class="${cls}">${label}</span>`;
       keyboardEl.append(cell);
     }
   }
 }
 
-function keyEl(pos: Dir | 'close', label: string, sub: string, longLabel: string, hint: string) {
+function keyEl(pos: Dir | 'close', label: string, sub: string, longLabel: string | undefined, hint: string) {
   const el = document.createElement('div');
   el.className = 'key';
   el.id = `key-${pos}`;
   // 「ABCDE」のような長いラベルは小さめに
   const cls = [...label].length > 2 ? 'main small' : 'main';
+  const long = longLabel ? `<span class="long">${t('key.long', { label: longLabel })}</span>` : '';
   el.innerHTML = `<span class="hint">${hint}</span><span class="${cls}">${label}</span>
-    <span class="sub">${sub}</span><span class="long">${t('key.long', { label: longLabel })}</span>`;
+    <span class="sub">${sub}</span>${long}`;
   return el;
 }
 
-/** 1段目で目を閉じた時に入るものの名前（な行／スペース） */
+/** 1段目で目を閉じた時に入るものの名前（な行／スペース／変換） */
 function closeShortName(): string {
   const cs = engine.keymap.closeShort;
-  return cs.kind === 'row' ? cs.row.speak : t('key.space');
+  if (cs.kind === 'row') return cs.row.speak;
+  return cs.item.kind === 'action' ? cs.item.label : t('key.space');
 }
 
 // ---- 視線インジケータ ----（キーボードと同じ3×3の並び）
@@ -302,11 +448,23 @@ function updateView(now: number) {
     if (cand?.kind === 'row') {
       main = `${cand.row.label}`;
       const longRow = engine.keymap.longRowByDir[engine.dir as SideDir];
-      sub = t('st.confirm') + (cand.long ? '' : t('st.keepLooking', { name: longRow.label }));
+      sub = t('st.confirm') + (cand.long || !longRow ? '' : t('st.keepLooking', { name: longRow.label }));
+    } else if (notice && now < notice.until) {
+      main = notice.text;
+      sub = isVowelMode() ? t('jv.chooseVowelSub') : '';
+    } else if (isVowelMode()) {
+      main = vowels ? t('jv.pending', { v: vowels }) : t('jv.chooseVowel');
+      sub = t('jv.chooseVowelSub');
     } else {
       main = t('st.chooseRow');
       sub = t('st.chooseRowSub', { name: closeShortName() });
     }
+  } else if (conv === 'waiting') {
+    main = t('jv.waiting');
+    sub = t('jv.waitingSub');
+  } else if (conv === 'choosing' && cand?.kind !== 'item') {
+    main = t('jv.choose');
+    sub = t('jv.chooseSub');
   } else {
     const row = engine.row!;
     if (cand?.kind === 'item') {
@@ -450,26 +608,43 @@ $('btn-start-sim').onclick = () => {
 function applyTexts() {
   document.documentElement.lang = settings.lang;
   applyStaticTexts();
+  $('btn-lang').textContent = t(isVowelMode() ? 'nav.langVowel' : 'nav.lang');
   gazeCells.closed.title = t('gaze.closed');
   renderKeyboard();
   if (mode !== 'none') setModeBadge();
   if ($<HTMLDialogElement>('settings').open) renderSettings();
 }
 
-function toggleLang(e: Event) {
-  // キーボード操作（Space など）でボタンが押されないよう、フォーカスを外す
-  (e.currentTarget as HTMLElement).blur();
-  settings.lang = settings.lang === 'ja' ? 'en' : 'ja';
+/** 言語・入力方式を切り替える。入力途中の母音や変換は捨てる */
+function switchInput(lang: Settings['lang'], jaInput: JaInput) {
+  settings.lang = lang;
+  settings.jaInput = jaInput;
   saveSettings(settings);
   setLang(settings.lang);
-  engine.setKeymap(KEYMAPS[settings.lang], performance.now());
+  vowels = '';
+  conv = 'idle';
+  convToken++;
+  notice = null;
+  renderText();
+  engine.setKeymap(keymapFor(settings.lang, settings.jaInput), performance.now());
   applyTexts();
   feedback.unlock();
-  void feedback.say(t('lang.name'));
+  void feedback.say(t(isVowelMode() ? 'lang.nameVowel' : 'lang.name'));
 }
 
-$('btn-lang').onclick = toggleLang;
-$('btn-start-lang').onclick = toggleLang;
+// 上のメニューは 日本語（12キー）→ 日本語（母音入力）→ English → … の順に切り替える
+$('btn-lang').onclick = (e) => {
+  // キーボード操作（Space など）でボタンが押されないよう、フォーカスを外す
+  (e.currentTarget as HTMLElement).blur();
+  if (settings.lang === 'en') switchInput('ja', 'kana');
+  else if (settings.jaInput === 'kana') switchInput('ja', 'vowel');
+  else switchInput('en', settings.jaInput);
+};
+// 開始画面のボタンは言語だけを切り替える
+$('btn-start-lang').onclick = (e) => {
+  (e.currentTarget as HTMLElement).blur();
+  switchInput(settings.lang === 'ja' ? 'en' : 'ja', settings.jaInput);
+};
 
 // ---- キャリブレーション ----
 const calibEl = $('calib');
@@ -579,6 +754,97 @@ function renderSettings() {
     label.append(t(`set.${f.key}` as TextKey), input);
     box.append(label);
   }
+  renderAiSettings(box);
+}
+
+/** 母音入力（AI 変換）の設定。API キーは設定とは別に、このブラウザだけに保存する */
+function renderAiSettings(box: HTMLElement) {
+  const head = document.createElement('h3');
+  head.textContent = t('set.aiSection');
+  box.append(head);
+
+  const field = (labelKey: TextKey, control: HTMLElement) => {
+    const label = document.createElement('label');
+    label.append(t(labelKey), control);
+    box.append(label);
+  };
+  const select = (options: [string, string][], value: string, onChange: (v: string) => void) => {
+    const el = document.createElement('select');
+    for (const [v, text] of options) el.append(new Option(text, v));
+    el.value = value;
+    el.onchange = () => onChange(el.value);
+    return el;
+  };
+
+  field(
+    'set.jaInput',
+    select(
+      [
+        ['kana', t('set.jaInput.kana')],
+        ['vowel', t('set.jaInput.vowel')],
+      ],
+      settings.jaInput,
+      (v) => switchInput(settings.lang, v as JaInput),
+    ),
+  );
+  field(
+    'set.aiProvider',
+    select(
+      (Object.keys(PROVIDER_LABELS) as AiProvider[]).map((p) => [p, PROVIDER_LABELS[p]]),
+      settings.aiProvider,
+      (v) => {
+        settings.aiProvider = v as AiProvider;
+        settings.aiModel = DEFAULT_MODELS[settings.aiProvider];
+        saveSettings(settings);
+        renderSettings();
+      },
+    ),
+  );
+
+  const model = document.createElement('input');
+  model.value = settings.aiModel;
+  model.placeholder = DEFAULT_MODELS[settings.aiProvider];
+  model.spellcheck = false;
+  model.onchange = () => {
+    settings.aiModel = model.value.trim() || DEFAULT_MODELS[settings.aiProvider];
+    saveSettings(settings);
+  };
+  field('set.aiModel', model);
+
+  const key = document.createElement('input');
+  key.type = 'password';
+  key.autocomplete = 'off';
+  key.spellcheck = false;
+  key.value = loadKey(settings.aiProvider);
+  key.onchange = () => saveKey(settings.aiProvider, key.value.trim());
+  field('set.aiKey', key);
+  const note = document.createElement('p');
+  note.className = 'note';
+  note.textContent = t('set.aiKeyNote');
+  box.append(note);
+
+  field(
+    'set.aiEffort',
+    select(
+      (['default', 'minimal', 'low', 'medium', 'high'] as AiEffort[]).map((e) => [e, e === 'default' ? t('set.aiEffort.default') : e]),
+      settings.aiEffort,
+      (v) => {
+        settings.aiEffort = v as AiEffort;
+        saveSettings(settings);
+      },
+    ),
+  );
+  field(
+    'set.aiRuns',
+    select(
+      ['1', '2', '3'].map((n) => [n, n]),
+      String(settings.aiRuns),
+      (v) => {
+        settings.aiRuns = Number(v);
+        saveSettings(settings);
+      },
+    ),
+  );
 }
 
 $('btn-settings').onclick = () => {
@@ -586,8 +852,8 @@ $('btn-settings').onclick = () => {
   $<HTMLDialogElement>('settings').showModal();
 };
 $('btn-reset-settings').onclick = () => {
-  // 言語は既定値に戻さない
-  Object.assign(settings, DEFAULT_SETTINGS, { lang: settings.lang });
+  // 言語と入力方式は既定値に戻さない
+  Object.assign(settings, DEFAULT_SETTINGS, { lang: settings.lang, jaInput: settings.jaInput });
   tracker.smoothing = settings.smoothing;
   saveSettings(settings);
   renderSettings();

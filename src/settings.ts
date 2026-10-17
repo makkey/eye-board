@@ -14,6 +14,12 @@ export const DEFAULT_SETTINGS: Settings = {
   sound: true,
   ttsRate: 1.3,
   lang: 'ja',
+  jaInput: 'kana',
+  // ラボの測定で、文節ごとの変換の精度・速さ・費用の釣り合いが最も良かった組み合わせ
+  aiProvider: 'gemini',
+  aiModel: 'gemini-3.8-flash',
+  aiEffort: 'low',
+  aiRuns: 1,
 };
 
 const KEY = 'eyeboard.settings.v1';

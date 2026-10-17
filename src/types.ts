@@ -38,7 +38,8 @@ export type Action =
   | 'newline'
   | 'clear'
   | 'undo'
-  | 'speak';
+  | 'speak'
+  | 'convert'; // 母音入力：ここまでの母音を1文節として AI に変換させる
 
 export type Item =
   | { kind: 'char'; ch: string; speak?: string; label?: string }
@@ -52,17 +53,26 @@ export interface Row {
   speak: string;
   /** あ段・い段・う段・え段・お段の順（FLOWER_DIRS に対応）。空きは null */
   items: (Item | null)[];
+  /** 2段目に入らず、確定した時点でこの1つを入力する（母音入力の「あ」など） */
+  direct?: Item;
+  /** 何もしなくても1段目へ戻らない（変換候補を読んで選ぶ間など） */
+  noIdle?: boolean;
 }
 
 export type Lang = 'ja' | 'en';
 
-/** 言語ごとのキー配置 */
+/** 日本語の入力方式。kana = 12キー（行→段）、vowel = 母音だけ入れて AI が変換 */
+export type JaInput = 'kana' | 'vowel';
+
+/** 言語・入力方式ごとのキー配置 */
 export interface Keymap {
+  /** ja / jv（日本語・母音入力）/ en */
+  id: string;
   lang: Lang;
   /** 1段目：方向を短く見た時の行 */
   rowByDir: Record<SideDir, Row>;
-  /** 1段目：方向を longMs 見続けた時の行 */
-  longRowByDir: Record<SideDir, Row>;
+  /** 1段目：方向を longMs 見続けた時の行（無い方向は、見続けても切り替わらない） */
+  longRowByDir: Partial<Record<SideDir, Row>>;
   /** 1段目：目を閉じた（下を見た）時。行に入るか、その場で1文字入れるか */
   closeShort: { kind: 'row'; row: Row } | { kind: 'item'; item: Item };
   /** 1段目：そのまま longMs まで閉じ続けた時の行 */
@@ -92,4 +102,14 @@ export interface Settings {
   sound: boolean;
   ttsRate: number;
   lang: Lang;
+  jaInput: JaInput;
+  /** 母音入力で使う AI（API キーは設定とは別に、このブラウザに保存する） */
+  aiProvider: AiProvider;
+  aiModel: string;
+  aiEffort: AiEffort;
+  /** 同じ問いを同時に聞く回数（順位を合算する） */
+  aiRuns: number;
 }
+
+export type AiProvider = 'gemini' | 'openai' | 'claude';
+export type AiEffort = 'default' | 'minimal' | 'low' | 'medium' | 'high';

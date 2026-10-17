@@ -1,5 +1,5 @@
 import { FLOWER_DIRS } from './types';
-import type { Dir, Item, Keymap, Lang, Row } from './types';
+import type { Dir, Item, JaInput, Keymap, Lang, Row } from './types';
 
 const c = (ch: string, speak?: string, label?: string): Item => ({ kind: 'char', ch, speak, label });
 const a = (action: Extract<Item, { kind: 'action' }>['action'], label: string, speak: string): Item => ({
@@ -66,6 +66,7 @@ const JA: Record<string, Row> = {
 };
 
 export const JA_KEYMAP: Keymap = {
+  id: 'ja',
   lang: 'ja',
   rowByDir: { UL: JA.a, U: JA.ka, UR: JA.sa, L: JA.ta, R: JA.ha },
   // 編集は ←（「← を2秒、続けて ←」で削除）
@@ -148,6 +149,7 @@ const EN: Record<string, Row> = {
 };
 
 export const EN_KEYMAP: Keymap = {
+  id: 'en',
   lang: 'en',
   rowByDir: { UL: EN.ae, U: EN.fj, UR: EN.ko, L: EN.pt, R: EN.uy },
   // Edit は ←（「← を2秒、続けて ←」で Backspace）
@@ -156,7 +158,40 @@ export const EN_KEYMAP: Keymap = {
   closeLong: EN.symbols,
 };
 
+// ---- 日本語・母音入力 ----
+// 各拍の母音だけを入れ、文節ごとに AI が漢字かな交じりに変換する。
+// 母音は12キーの2段目と同じフラワー配置（← あ ↖ い ↑ う ↗ え → お）で、1回見るだけで入る。
+// っ は次の拍の母音、ー は前の拍の母音で入れる（キーが要らない）。
+
+function vowelRow(v: string): Row {
+  return { id: `jv-${v}`, label: v, speak: v, items: [], direct: c(v) };
+}
+
+const JV: Record<string, Row> = {
+  n: vowelRow('ん'),
+  kigo: {
+    id: 'jv-kigo',
+    label: '記号',
+    speak: '記号',
+    items: [c('、', 'てん'), c('。', 'まる'), c('？', 'はてな'), c('！', 'びっくり'), a('newline', '改行', '改行')],
+  },
+};
+
+export const VOWEL_KEYMAP: Keymap = {
+  id: 'jv',
+  lang: 'ja',
+  rowByDir: { L: vowelRow('あ'), UL: vowelRow('い'), U: vowelRow('う'), UR: vowelRow('え'), R: vowelRow('お') },
+  // 編集は12キーと同じく ←（「← を2秒、続けて ←」で1拍削除）。ん は ↖ を2秒
+  longRowByDir: { L: JA.edit, UL: JV.n },
+  closeShort: { kind: 'item', item: a('convert', '変換', '変換') },
+  closeLong: JV.kigo,
+};
+
 export const KEYMAPS: Record<Lang, Keymap> = { ja: JA_KEYMAP, en: EN_KEYMAP };
+
+export function keymapFor(lang: Lang, jaInput: JaInput): Keymap {
+  return lang === 'ja' && jaInput === 'vowel' ? VOWEL_KEYMAP : KEYMAPS[lang];
+}
 
 /** 2段目：方向 → その行の何番目の項目か（中央は -1） */
 export function flowerIndex(dir: Dir): number {
