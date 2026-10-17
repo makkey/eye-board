@@ -434,6 +434,7 @@ function trackerDiagnostics(): string {
     `処理したフレーム: ${tracker.frames}`,
     `映像: ${v.videoWidth}×${v.videoHeight}`,
     `エラー: ${tracker.lastError ?? 'なし'}`,
+    ...(tracker.badFrames ? [`数値にならないフレーム: ${tracker.badFrames}（${tracker.lastBad}）`] : []),
   ].join(' / ');
 }
 

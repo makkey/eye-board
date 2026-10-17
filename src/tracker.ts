@@ -41,6 +41,9 @@ export class Tracker {
   frames = 0;
   lastFrameAt = 0;
   lastError: string | null = null;
+  /** 数値にならなかった（NaN など）フレームの数と、その時の様子 */
+  badFrames = 0;
+  lastBad: string | null = null;
 
   constructor(video: HTMLVideoElement) {
     this.video = video;
@@ -127,12 +130,19 @@ export class Tracker {
     this.lastFrameAt = t;
     const lm = res.faceLandmarks[0];
     const bs = res.faceBlendshapes[0]?.categories;
-    if (lm && bs) {
-      const raw = extractFeature(lm, bs, v.videoWidth / v.videoHeight);
+    const aspect = v.videoWidth > 0 && v.videoHeight > 0 ? v.videoWidth / v.videoHeight : 1;
+    // 虹彩（468〜477）まで揃っていない時は特徴量を作れない
+    const raw = lm && lm.length >= 478 && bs?.length ? extractFeature(lm, bs, aspect) : null;
+    if (raw && raw.every(Number.isFinite)) {
       const a = this.smoothing;
       this.smoothed = this.smoothed ? raw.map((x, i) => a * x + (1 - a) * this.smoothed![i]) : raw;
       this.onFrame({ t, faceFound: true, feature: this.smoothed, landmarks: lm });
     } else {
+      if (lm) {
+        // 顔はあるのに特徴量が数値にならない：平滑化に NaN が混ざると以後ずっと NaN になるので捨てる
+        this.badFrames++;
+        this.lastBad = `ランドマーク ${lm.length} / blendshape ${bs?.length ?? 0} / 特徴量 ${raw?.map((x) => x.toFixed(2)).join(',') ?? '-'}`;
+      }
       this.onFrame({ t, faceFound: false, feature: this.smoothed ?? [0, 0, 0, 0, 0, 0] });
     }
   }
@@ -150,13 +160,34 @@ function createLandmarker(delegate: 'GPU' | 'CPU') {
   );
 }
 
+/** MediaPipe の blendshape の並び順（使うものだけ） */
+const BLENDSHAPE_INDEX: Record<string, number> = {
+  eyeBlinkLeft: 9,
+  eyeBlinkRight: 10,
+  eyeLookDownLeft: 11,
+  eyeLookDownRight: 12,
+  eyeLookInLeft: 13,
+  eyeLookInRight: 14,
+  eyeLookOutLeft: 15,
+  eyeLookOutRight: 16,
+  eyeLookUpLeft: 17,
+  eyeLookUpRight: 18,
+};
+
 export function extractFeature(
   lm: NormalizedLandmark[],
   categories: Category[],
   aspect: number,
 ): Feature {
   const b: Record<string, number> = {};
-  for (const c of categories) b[c.categoryName] = c.score;
+  for (const c of categories) if (c.categoryName) b[c.categoryName] = c.score;
+  // 名前が付いていない環境に備えて、標準の並び順（index）からも引けるようにする
+  for (const [name, index] of Object.entries(BLENDSHAPE_INDEX)) {
+    if (b[name] === undefined) {
+      const c = categories.find((x) => x.index === index) ?? categories[index];
+      if (c) b[name] = c.score;
+    }
+  }
 
   // blendshape の Left/Right は本人から見た左右
   const bsX = (b.eyeLookInLeft + b.eyeLookOutRight - b.eyeLookOutLeft - b.eyeLookInRight) / 2;

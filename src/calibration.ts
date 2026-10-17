@@ -52,7 +52,7 @@ export class CalibrationRun {
   push(f: TrackerFrame) {
     if (!this.recording) return;
     this.seen++;
-    if (!f.faceFound) {
+    if (!f.faceFound || !f.feature.every(Number.isFinite)) {
       this.missed++;
       return;
     }
