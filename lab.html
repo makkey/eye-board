@@ -63,6 +63,12 @@
         <label class="field">指示文（モデルへの指示の版。同じモデルで版を変えて比べられます）
           <select id="prompt-version"></select>
         </label>
+        <label class="field">っ・ー の入れ方
+          <select id="vowel-style">
+            <option value="mark">っ・ー をそのまま入れる（例：とって→おっえ、かーてん→あーえん）</option>
+            <option value="fold">っ は次の音の母音、ー は前の音の母音で入れる（例：とって→おええ、かーてん→ああえん）</option>
+          </select>
+        </label>
         <label class="field">同時に聞く回数（返答は毎回少し違うので、何回か同時に聞いて候補の順位を合算する。待ち時間はほぼ同じで、料金は回数倍）
           <select id="runs">
             <option value="1">1回</option>

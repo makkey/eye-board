@@ -1,25 +1,46 @@
 import { normalizeSpaces, toHiragana, toVowels } from './vowels';
+import type { VowelStyle } from './vowels';
 
 /** 母音の規則（v1・v2 共通） */
-const RULES = `あなたは、目の動きだけで文字を入力する人のための日本語入力補助です。
+function rules(style: VowelStyle): string {
+  const special =
+    style === 'fold'
+      ? `- 「ん」はそのまま入力されます。
+- 小さい「っ」は、次の拍の母音で表されます（とって→おええ、ちょっと→おおお、きって→いいえ）。
+- のばす「ー」は、前の拍の母音で表されます（かーてん→ああえん、こーひー→おおいい）。`
+      : '- 「ん」「っ」「ー」はそのまま入力されます。';
+  return `あなたは、目の動きだけで文字を入力する人のための日本語入力補助です。
 利用者は、日本語の各拍の母音だけを入力します。
 - 各拍は あ・い・う・え・お のどれかで表されます（か→あ、し→い、つ→う、て→え、の→お）。
 - 濁音・半濁音も同じ母音です（が→あ、ぱ→あ）。
 - 拗音（きゃ・しゅ・ちょ など）は1拍で、ゃ→あ、ゅ→う、ょ→お です。
-- 「ん」「っ」「ー」はそのまま入力されます。
+${special}
 - 母音は書いたかなの通りです。助詞の「は」は あ、「を」は お、「へ」は え。「とう」「こう」は お う、「せい」は え い。
 - 空白は文節の区切りです（主に助詞の後ろ）。`;
+}
 
 /** v1：規則だけを伝える */
-const SYSTEM_PROMPT_V1 = `${RULES}
+const systemV1 = (style: VowelStyle) => `${rules(style)}
 
 入力された母音列に当てはまる、日常会話として自然な日本語を、可能性が高い順に最大5つ挙げてください。
 各候補には、漢字かな交じりの表記（text）と、ひらがなの読み（reading。入力と同じ位置に空白を入れる）を付けてください。
 reading を上の規則で母音に変えたものが、入力と完全に一致しなければなりません。一致しない候補は出さないでください。
 「ここまでの文」が示された場合は、その続きとして自然な、次の文節だけを候補にしてください。`;
 
+/** v2 の例（測定用の例文には入っていない文） */
+const V2_EXAMPLES: [string, string][] = [
+  ['おかえりなさい', 'おかえりなさい'],
+  ['あめが ふって います', '雨が 降って います'],
+  ['おちゃを のみたい', 'お茶を 飲みたい'],
+];
+
 /** v2：例と自己確認を加え、候補を多めに出させる（母音が合わないものは受け取った側で捨てる） */
-const SYSTEM_PROMPT_V2 = `${RULES}
+const systemV2 = (style: VowelStyle) => {
+  const examples = V2_EXAMPLES.map(([reading, text]) => {
+    const v = toVowels(reading, style);
+    return `- 「${v}」→ reading「${reading}」、vowels「${v}」、text「${text}」`;
+  }).join('\n');
+  return `${rules(style)}
 
 入力された母音列に当てはまる、日常会話として自然な日本語を、可能性が高い順に最大10個挙げてください。
 
@@ -35,11 +56,10 @@ const SYSTEM_PROMPT_V2 = `${RULES}
 vowels が入力と一致しない候補は出さないでください。
 
 例（入力 → 候補の一つ）：
-- 「おあえいああい」→ reading「おかえりなさい」、vowels「おあえいああい」、text「おかえりなさい」
-- 「あえあ うっえ いあう」→ reading「あめが ふって います」、vowels「あえあ うっえ いあう」、text「雨が 降って います」
-- 「おあお おいあい」→ reading「おちゃを のみたい」、vowels「おあお おいあい」、text「お茶を 飲みたい」
+${examples}
 
 「ここまでの文」が示された場合は、その続きとして自然な、次の文節だけを候補にしてください。`;
+};
 
 /** JSON Schema を作る（Claude / ChatGPT 用。Gemini 用には providers.ts で変換する） */
 function candidatesSchema(fields: string[]) {
@@ -67,7 +87,8 @@ export type PromptId = 'v1' | 'v2';
 export interface PromptVersion {
   id: PromptId;
   label: string;
-  system: string;
+  /** っ・ー の入れ方ごとの指示 */
+  system: (style: VowelStyle) => string;
   schema: JsonSchema;
   /** 受け取った候補を、母音が合うものを先に並べ替えるか */
   validFirst: boolean;
@@ -75,11 +96,11 @@ export interface PromptVersion {
 
 /** 指示文の版（system は全リクエストで同じ。先頭に固定しておくとキャッシュが効く） */
 export const PROMPTS: Record<PromptId, PromptVersion> = {
-  v1: { id: 'v1', label: 'v1（規則のみ・5候補）', system: SYSTEM_PROMPT_V1, schema: candidatesSchema(['text', 'reading']), validFirst: false },
+  v1: { id: 'v1', label: 'v1（規則のみ・5候補）', system: systemV1, schema: candidatesSchema(['text', 'reading']), validFirst: false },
   v2: {
     id: 'v2',
     label: 'v2（例・自己確認つき・10候補から母音の合う上位5つ）',
-    system: SYSTEM_PROMPT_V2,
+    system: systemV2,
     schema: candidatesSchema(['reading', 'vowels', 'text']),
     validFirst: true,
   },
@@ -112,13 +133,20 @@ const compact = (s: string) => toHiragana(normalizeSpaces(s)).replace(/ /g, '');
  * validFirst の時は母音が合う候補を先に並べる（同じ読み・表記の重複は除く）。
  * 返すのは受け取った全候補。採点・表示には先頭の TOP_N 個を使う。
  */
-export function judge(raw: string, inputVowels: string, goldReading: string, goldText: string, validFirst = false): Candidate[] {
+export function judge(
+  raw: string,
+  inputVowels: string,
+  goldReading: string,
+  goldText: string,
+  validFirst = false,
+  style: VowelStyle = 'mark',
+): Candidate[] {
   const json = parseCandidates(raw);
   const want = inputVowels.replace(/ /g, '');
   const all = (json.candidates ?? []).map((c) => {
     const text = String(c.text ?? '');
     const reading = String(c.reading ?? '');
-    const v = toVowels(reading);
+    const v = toVowels(reading, style);
     return {
       text,
       reading,

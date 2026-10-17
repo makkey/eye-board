@@ -6,6 +6,7 @@ import type { Candidate, PromptId, PromptVersion } from './decode';
 import { PROVIDERS, setSarashinaRelay } from './providers';
 import type { Effort, ProviderId } from './providers';
 import { toVowels } from './vowels';
+import type { VowelStyle } from './vowels';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -135,18 +136,29 @@ for (const v of Object.values(PROMPTS)) {
 const savedPrompt = store.get('prompt');
 promptSelect.value = savedPrompt && savedPrompt in PROMPTS ? savedPrompt : 'v2';
 const promptVersion = () => PROMPTS[promptSelect.value as PromptId];
+
+// ---- っ・ー の入れ方 ----
+const styleSelect = $<HTMLSelectElement>('vowel-style');
+styleSelect.value = store.get('style') === 'fold' ? 'fold' : 'mark';
+const vowelStyle = () => styleSelect.value as VowelStyle;
+styleSelect.onchange = () => {
+  store.set('style', styleSelect.value);
+  showPrompt();
+};
+
 function showPrompt() {
   const p = promptVersion();
+  const style = vowelStyle();
   $('prompt-preview').textContent = [
     '【指示（system）】',
-    p.system,
+    p.system(style),
     '',
     '【問い合わせ（user）の例】',
     '文単位：',
-    sentencePrompt('いおうあ あおいあっあえ あいあおう'),
+    sentencePrompt(toVowels('きのうは たのしかったね ありがとう', style)!),
     '',
     '文節ごと：',
-    segmentPrompt('昨日は', 'あおいあっあえ'),
+    segmentPrompt('昨日は', toVowels('たのしかったね', style)!),
     '',
     '【返答の形（JSON Schema）】',
     JSON.stringify(p.schema, null, 2),
@@ -167,11 +179,12 @@ interface Target {
   prompt: PromptVersion;
   /** 同時に聞く回数 */
   runs: number;
+  style: VowelStyle;
 }
 
 function currentTarget(): Target {
   const runs = Number($<HTMLSelectElement>('runs').value) || 1;
-  return { provider: providerId, key: requireKey(), model: currentModel(), effort: effort(), prompt: promptVersion(), runs };
+  return { provider: providerId, key: requireKey(), model: currentModel(), effort: effort(), prompt: promptVersion(), runs, style: vowelStyle() };
 }
 
 const runsSelect = $<HTMLSelectElement>('runs');
@@ -196,22 +209,27 @@ interface Answer {
 async function ask(user: string, vowels: string, goldReading: string, goldText: string, t: Target): Promise<Answer> {
   const start = performance.now();
   const settled = await Promise.allSettled(
-    Array.from({ length: t.runs }, () => PROVIDERS[t.provider].generate(t.key, t.model, t.prompt.system, t.prompt.schema, user, t.effort)),
+    Array.from({ length: t.runs }, () => PROVIDERS[t.provider].generate(t.key, t.model, t.prompt.system(t.style), t.prompt.schema, user, t.effort)),
   );
   const ms = performance.now() - start;
   const raws = settled.flatMap((s) => (s.status === 'fulfilled' ? [s.value] : []));
   const runs: Candidate[][] = [];
+  let received = 0;
+  let receivedValid = 0;
   let firstError: unknown = settled.find((s) => s.status === 'rejected')?.reason;
   for (const raw of raws) {
     try {
-      runs.push(judge(raw, vowels, goldReading, goldText, t.prompt.validFirst));
+      // v2 は母音が合わない候補（必ず不正解）を捨てる。受け取った数は別に数えておく
+      const all = judge(raw, vowels, goldReading, goldText, t.prompt.validFirst, t.style);
+      received += all.length;
+      receivedValid += all.filter((c) => c.valid).length;
+      runs.push(t.prompt.validFirst ? all.filter((c) => c.valid) : all);
     } catch (e) {
       firstError ??= e;
     }
   }
   if (!runs.length) throw firstError;
-  const flat = runs.flat();
-  return { all: mergeRuns(runs, t.prompt.validFirst), single: runs[0], received: flat.length, receivedValid: flat.filter((c) => c.valid).length, ms, raws };
+  return { all: mergeRuns(runs, t.prompt.validFirst), single: runs[0], received, receivedValid, ms, raws };
 }
 
 // ---- 試し入力 ----
@@ -223,7 +241,7 @@ $('btn-try').onclick = async () => {
   error.textContent = '';
   $('try-raw-box').hidden = true;
 
-  const vowels = toVowels($<HTMLInputElement>('try-input').value);
+  const vowels = toVowels($<HTMLInputElement>('try-input').value, vowelStyle());
   if (!vowels) {
     error.textContent = '母音（あいうえお・ん・っ・ー）、ひらがな・カタカナ、空白だけで入力してください。';
     return;
@@ -327,19 +345,19 @@ let results: Summary[] = JSON.parse(store.get('results') ?? '[]');
 let lastRun: TaskResult[] = [];
 let stopRequested = false;
 
-function buildTasks(mode: string, limit: number): Task[] {
+function buildTasks(mode: string, limit: number, style: VowelStyle): Task[] {
   const { sentences } = parseSentences(datasetEl.value);
   const tasks: Task[] = [];
   sentences.slice(0, limit).forEach((s, i) => {
     if (mode === 'sentence') {
-      const vowels = toVowels(s.readings.join(' '));
+      const vowels = toVowels(s.readings.join(' '), style);
       if (vowels) {
         tasks.push({ vowels, user: sentencePrompt(vowels), goldReading: s.readings.join(' '), goldText: s.surfaces.join(''), sentence: i });
       }
       return;
     }
     s.readings.forEach((reading, j) => {
-      const vowels = toVowels(reading);
+      const vowels = toVowels(reading, style);
       if (!vowels) return;
       const context = s.surfaces.slice(0, j).join('');
       tasks.push({ vowels, user: segmentPrompt(context, vowels), goldReading: reading, goldText: s.surfaces[j], sentence: i });
@@ -362,7 +380,7 @@ $('btn-run').onclick = async () => {
   }
   const mode = (document.querySelector('input[name=mode]:checked') as HTMLInputElement).value;
   const limit = Math.max(1, Number($<HTMLInputElement>('limit').value) || 20);
-  const tasks = buildTasks(mode, limit);
+  const tasks = buildTasks(mode, limit, target.style);
   if (!tasks.length) return;
   lastTarget = target;
   lastMode = mode;
@@ -466,7 +484,7 @@ function summarize(t: Target, mode: string, rs: TaskResult[]): Summary {
   // 割合はエラーにならなかった問いの中で数える（混雑や回数制限で精度が低く見えないように）
   const n = ok.length || 1;
   return {
-    model: `${PROVIDERS[t.provider].label}: ${t.model}${effortLabel} / 指示文 ${t.prompt.id}${t.runs > 1 ? ` / ${t.runs}回合算` : ''}`,
+    model: `${PROVIDERS[t.provider].label}: ${t.model}${effortLabel} / 指示文 ${t.prompt.id}${t.runs > 1 ? ` / ${t.runs}回合算` : ''}${t.style === 'fold' ? ' / っー母音' : ''}`,
     mode: modeLabel,
     n: rs.length,
     top1: ok.filter((r) => r.candidates[0]?.correct).length / n,

@@ -22,4 +22,13 @@ describe('toVowels', () => {
   it('変換できない文字は null', () => {
     expect(toVowels('abc')).toBeNull();
   });
+
+  it('fold では っ は次の母音、ー は前の母音', () => {
+    expect(toVowels('めがねを とって ください', 'fold')).toBe('えあえお おええ うああい');
+    expect(toVowels('かーてん', 'fold')).toBe('ああえん');
+    expect(toVowels('こーひー', 'fold')).toBe('おおいい');
+    expect(toVowels('ちょっと', 'fold')).toBe('おおお');
+    // 文節の最後の っ は前の母音
+    expect(toVowels('あっ そう', 'fold')).toBe('ああ おう');
+  });
 });

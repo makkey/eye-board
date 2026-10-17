@@ -86,9 +86,15 @@ describe('mergeRuns', () => {
 
 describe('PROMPTS', () => {
   it('v2 の例は規則どおりの母音になっている', () => {
-    const examples = [...PROMPTS.v2.system.matchAll(/reading「(.+?)」、vowels「(.+?)」/g)];
-    expect(examples.length).toBe(3);
-    for (const [, reading, vowels] of examples) expect(toVowels(reading)).toBe(vowels);
+    for (const style of ['mark', 'fold'] as const) {
+      const examples = [...PROMPTS.v2.system(style).matchAll(/「(.+?)」→ reading「(.+?)」、vowels「(.+?)」/g)];
+      expect(examples.length).toBe(3);
+      for (const [, input, reading, vowels] of examples) {
+        expect(toVowels(reading, style)).toBe(vowels);
+        expect(input).toBe(vowels);
+      }
+    }
+    expect(PROMPTS.v2.system('fold')).toContain('うええ');
   });
 
   it('スキーマの必須項目がプロパティと一致する', () => {
