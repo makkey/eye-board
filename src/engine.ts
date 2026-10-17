@@ -20,8 +20,6 @@ export interface EngineEvents {
   commit?(item: Item): void;
   /** 何も選ばずに1段目へ戻った */
   cancel?(reason: 'back' | 'close' | 'idle'): void;
-  /** 目を閉じ続けて閾値を越えた（1: 選択／戻る, 2: 休む＝何もしない） */
-  closeTick?(level: 1 | 2): void;
   /** 安定した視線方向が変わった */
   dirChange?(dir: Dir): void;
 }
@@ -32,11 +30,11 @@ export interface EngineEvents {
  * 1段目（行）
  * - 方向を selectMs 見続けると候補、中央に戻ると確定
  * - 一部の方向は longMs 見続けると別の行（わ・゛゜小・句読点・編集）に切り替わる
- * - 目を closeMinMs 以上閉じて開くと「な行」。restCloseMs 以上なら何もしない（目を休める）
+ * - 目を closeMinMs 閉じ続けた時点で「な行」（開けるタイミングは問わない）
  *
  * 2段目（フラワー配置：左から時計回りに あ・い・う・え・お）
  * - 方向を selectMs 見続けると候補、中央に戻ると確定
- * - 下方向（↙↓↘）を見て戻る、または目を closeMinMs 以上閉じて開くと、何も選ばず1段目へ
+ * - 下方向（↙↓↘）を見て戻る、または目を closeMinMs 閉じ続けると、何も選ばず1段目へ
  * - idleMs 何もしなくても1段目へ
  */
 export class InputEngine {
@@ -50,7 +48,8 @@ export class InputEngine {
   held = 0;
   /** 目を閉じ始めた時刻（デバウンス後に確定、開始時刻は遡る） */
   closedStart: number | null = null;
-  closeLevel: 0 | 1 | 2 = 0;
+  /** 今回目を閉じている間に、閉じる操作をもう実行したか（開けるまで次は受け付けない） */
+  closeDone = false;
 
   private pendingDir: Dir = 'C';
   private pendingSince = 0;
@@ -76,7 +75,7 @@ export class InputEngine {
     this.pendingSince = t;
     this.held = 0;
     this.closedStart = null;
-    this.closeLevel = 0;
+    this.closeDone = false;
     this.lastActivity = t;
     this.lastT = null;
     this.rawClosed = false;
@@ -94,7 +93,7 @@ export class InputEngine {
       this.rawClosed = false;
       this.closedStable = false;
       this.closedStart = null;
-      this.closeLevel = 0;
+      this.closeDone = false;
       this.lastActivity = t;
       return;
     }
@@ -108,7 +107,7 @@ export class InputEngine {
       this.closedStable = this.rawClosed;
       if (this.closedStable) {
         this.closedStart = this.rawClosedSince;
-        this.closeLevel = 0;
+        this.closeDone = false;
       } else {
         this.onOpen(t);
       }
@@ -132,36 +131,27 @@ export class InputEngine {
   }
 
   private updateClosed(t: number) {
-    if (this.closedStart === null || !this.closeActionAvailable()) return;
-    const dur = t - this.closedStart;
-    if (this.closeLevel < 1 && dur >= this.settings.closeMinMs) {
-      this.closeLevel = 1;
-      // 閉じる途中のまぶたは「下を見ている」と判定されやすい。意図して閉じたと分かった時点で、
-      // その方向は取り消して中央に戻す
-      this.dir = 'C';
-      this.pendingDir = 'C';
-      this.held = 0;
-      this.events.closeTick?.(1);
-    }
-    // 2段目では長さに関係なく「戻る」なので、休む段階は1段目だけ
-    if (this.closeLevel < 2 && this.stage === 'row' && dur >= this.settings.restCloseMs) {
-      this.closeLevel = 2;
-      this.events.closeTick?.(2);
-    }
+    if (this.closedStart === null || this.closeDone || !this.closeActionAvailable()) return;
+    if (t - this.closedStart < this.settings.closeMinMs) return;
+    // 閉じ続けた時点で実行する（開けるタイミングを計らなくてよいように）。
+    // 実行は1回だけで、目を開けるまで次の閉じる操作は数えない
+    this.closeDone = true;
+    // 閉じる途中のまぶたは「下を見ている」と判定されやすい。意図して閉じたと分かった時点で、
+    // その方向は取り消して中央に戻す
+    this.dir = 'C';
+    this.pendingDir = 'C';
+    this.held = 0;
+    if (this.stage === 'row') this.enterChar(ROWS[ROW_BY_DIR.C], t);
+    else this.cancel('close');
   }
 
   private onOpen(t: number) {
-    const level = this.closeLevel;
     this.closedStart = null;
-    this.closeLevel = 0;
+    this.closeDone = false;
     this.lastActivity = t;
     // 開いた直後の視線は不安定なので、方向のデバウンスをやり直す
     this.pendingDir = this.dir;
     this.pendingSince = t;
-
-    if (level !== 1) return;
-    if (this.stage === 'row') this.enterChar(ROWS[ROW_BY_DIR.C], t);
-    else this.cancel('close');
   }
 
   private updateDir(raw: Dir, t: number) {

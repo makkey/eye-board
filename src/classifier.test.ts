@@ -43,7 +43,7 @@ function makeSamples() {
   return samples;
 }
 
-const opt = { prev: null, hysteresis: 0.75, centerBias: 1 };
+const opt = { prev: null, hysteresis: 0.75, centerBias: 1, closedBias: 1 };
 
 describe('classify', () => {
   const cal = buildCalibration(makeSamples());
@@ -55,6 +55,18 @@ describe('classify', () => {
   it('下を見るのと目を閉じるのを区別する', () => {
     expect(cal.quality.D).toBeGreaterThan(0.9);
     expect(cal.quality.closed).toBeGreaterThan(0.9);
+  });
+
+  it('「下」から「閉じる」へはヒステリシスなしで移る', () => {
+    // 下と閉じるの中間よりわずかに閉じる寄り（ヒステリシスがあれば「下」に留まる位置）
+    const mid = feat('D').map((v, i) => v + (feat('closed')[i] - v) * 0.52);
+    expect(classify(mid, cal, { ...opt, prev: 'D' }).cls).toBe('closed');
+  });
+
+  it('closedBias を小さくすると閉じていると判定されやすい', () => {
+    const mid = feat('D').map((v, i) => v + (feat('closed')[i] - v) * 0.45);
+    expect(classify(mid, cal, opt).cls).toBe('D');
+    expect(classify(mid, cal, { ...opt, closedBias: 0.5 }).cls).toBe('closed');
   });
 
   it('ヒステリシスで境界付近は前の方向を保つ', () => {

@@ -75,12 +75,12 @@ export interface Settings {
   selectMs: number;
   longMs: number;
   closeMinMs: number;
-  restCloseMs: number;
   idleMs: number;
   debounceMs: number;
   smoothing: number;
   hysteresis: number;
   centerBias: number;
+  closedBias: number;
   tts: boolean;
   sound: boolean;
   ttsRate: number;

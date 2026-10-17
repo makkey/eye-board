@@ -38,6 +38,8 @@ export interface ClassifyOptions {
   hysteresis: number;
   /** 中央の距離に掛ける係数。小さいほど中央が広くなる */
   centerBias: number;
+  /** 「目を閉じる」の距離に掛ける係数。小さいほど閉じていると判定されやすい */
+  closedBias: number;
 }
 
 export function classify(f: Feature, cal: Calibration, opt: ClassifyOptions): ClassifyResult {
@@ -48,10 +50,15 @@ export function classify(f: Feature, cal: Calibration, opt: ClassifyOptions): Cl
     let d = 0;
     for (let i = 0; i < mu.length; i++) d += (f[i] - mu[i]) ** 2 / cal.variance[i];
     if (cls === 'C') d *= opt.centerBias;
+    if (cls === 'closed') d *= opt.closedBias;
     distances[cls] = d;
     if (d < distances[best]!) best = cls;
   }
-  if (opt.prev && opt.prev !== best && distances[opt.prev] !== undefined) {
+  // 目を閉じる時はまぶたが下がる途中で「下」を通るので、そこから「閉じる」へ移る時に
+  // ヒステリシスで「下」に留まらないよう、閉じる／開くの切り替えには掛けない
+  // （瞬間的な揺れはエンジン側のデバウンスで吸収する）
+  const involvesClosed = best === 'closed' || opt.prev === 'closed';
+  if (opt.prev && opt.prev !== best && !involvesClosed && distances[opt.prev] !== undefined) {
     if (distances[best]! > distances[opt.prev]! * opt.hysteresis) best = opt.prev;
   }
   return { cls: best, distances };
@@ -119,7 +126,7 @@ export function buildCalibration(samples: Record<GazeClass, Feature[]>): Calibra
     variance,
     quality: {} as Record<GazeClass, number>,
   };
-  const opt = { prev: null, hysteresis: 1, centerBias: 1 };
+  const opt = { prev: null, hysteresis: 1, centerBias: 1, closedBias: 1 };
   for (const cls of ALL_CLASSES) {
     const ok = samples[cls].filter((f) => classify(f, cal, opt).cls === cls).length;
     cal.quality[cls] = ok / samples[cls].length;

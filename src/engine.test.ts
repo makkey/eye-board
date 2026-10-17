@@ -76,13 +76,26 @@ describe('InputEngine', () => {
     expect(engine.stage).toBe('row');
   });
 
-  it('1段目で長く目を閉じると何もしない（休む）', () => {
-    const { log, engine } = run([
+  it('目を閉じ続けた時点で な行（開けるのが遅くてもよい）', () => {
+    const { rows, engine } = run([
       ['C', 300],
-      ['closed', 2000],
+      ['closed', 2500],
+    ]);
+    expect(rows).toEqual(['na']);
+    expect(engine.stage).toBe('char');
+    expect(engine.row?.id).toBe('na');
+  });
+
+  it('な行に入った後も閉じ続けていて、2段目の「戻る」にはならない', () => {
+    const { rows, log, engine } = run([
+      ['C', 300],
+      ['closed', 2500],
+      ['C', 300],
+      ['UL', 600],
       ['C', 300],
     ]);
-    expect(log).toEqual([]);
+    expect(rows).toEqual(['na']);
+    expect(log).toEqual(['に']);
     expect(engine.stage).toBe('row');
   });
 

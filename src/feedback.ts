@@ -1,6 +1,6 @@
 import type { Settings } from './types';
 
-type Tone = 'tick' | 'long' | 'commit' | 'cancel' | 'close1' | 'close2' | 'start' | 'done';
+type Tone = 'tick' | 'long' | 'commit' | 'cancel' | 'start' | 'done';
 
 const TONES: Record<Tone, [number, number][]> = {
   // [周波数Hz, 長さms] の列
@@ -17,8 +17,6 @@ const TONES: Record<Tone, [number, number][]> = {
     [440, 80],
     [330, 120],
   ],
-  close1: [[740, 90]],
-  close2: [[370, 150]],
   start: [[1046, 120]],
   done: [
     [784, 70],

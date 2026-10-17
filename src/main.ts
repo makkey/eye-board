@@ -70,9 +70,6 @@ const engine = new InputEngine(settings, {
     if (reason !== 'back') void feedback.say(reason === 'idle' ? 'キャンセル' : 'もどる');
     renderKeyboard();
   },
-  closeTick(level) {
-    feedback.play(level === 1 ? 'close1' : 'close2');
-  },
 });
 
 // ---- テキスト ----
@@ -222,13 +219,7 @@ function updateView(t: number) {
   let fill = 0;
   let marker: number | null = null;
   if (engine.closedStart !== null) {
-    const dur = t - engine.closedStart;
-    if (engine.stage === 'row') {
-      fill = dur / settings.restCloseMs;
-      marker = settings.closeMinMs / settings.restCloseMs;
-    } else {
-      fill = dur / settings.closeMinMs;
-    }
+    fill = engine.closeDone ? 1 : (t - engine.closedStart) / settings.closeMinMs;
   } else if (engine.dir !== 'C') {
     const held = engine.held;
     if (engine.stage === 'row' && LONG_ROW_BY_DIR[engine.dir]) {
@@ -248,11 +239,9 @@ function updateView(t: number) {
     main = '顔が見つかりません';
     sub = 'カメラに顔が正面から映るようにしてください';
   } else if (engine.closedStart !== null) {
-    const dur = t - engine.closedStart;
     main = '目を閉じています';
-    if (dur < settings.closeMinMs) sub = '…';
-    else if (engine.stage === 'char') sub = '開けると戻る';
-    else sub = dur < settings.restCloseMs ? '開けると な行' : '休憩中（開けても何もしません）';
+    if (engine.closeDone) sub = engine.stage === 'char' ? `${engine.row!.speak}を選びました。目を開けてください` : 'もどりました。目を開けてください';
+    else sub = `そのまま閉じていると${engine.stage === 'row' ? ' な行' : '、もどる'}`;
   } else if (engine.stage === 'row') {
     if (cand?.kind === 'row') {
       main = `${cand.row.label}`;
@@ -296,6 +285,7 @@ function onTrackerFrame(f: TrackerFrame) {
         prev: lastRaw?.cls ?? null,
         hysteresis: settings.hysteresis,
         centerBias: settings.centerBias,
+        closedBias: settings.closedBias,
       })
     : classifyDefault(f.feature);
   closedNow = f.faceFound && lastRaw.cls === 'closed';
@@ -432,12 +422,12 @@ const FIELDS: { key: keyof Settings; label: string; step?: number; min?: number;
   { key: 'selectMs', label: '候補になるまで（ms）', step: 50, min: 100 },
   { key: 'longMs', label: '長く見る（わ・゛など）（ms）', step: 100, min: 500 },
   { key: 'closeMinMs', label: '目を閉じて選択（ms）', step: 50, min: 200 },
-  { key: 'restCloseMs', label: '目を閉じて休む（1段目）（ms）', step: 100, min: 500 },
   { key: 'idleMs', label: '無操作キャンセル（ms）', step: 500, min: 1000 },
   { key: 'debounceMs', label: '揺れの無視（ms）', step: 10, min: 0 },
   { key: 'smoothing', label: '平滑化（1 = なし）', step: 0.05, min: 0.05, max: 1 },
   { key: 'hysteresis', label: '方向切替の粘り（小 = 粘る）', step: 0.05, min: 0.3, max: 1 },
   { key: 'centerBias', label: '中央の広さ（小 = 広い）', step: 0.05, min: 0.2, max: 3 },
+  { key: 'closedBias', label: '閉じた判定の広さ（小 = 閉じたと判定しやすい）', step: 0.05, min: 0.1, max: 3 },
   { key: 'ttsRate', label: '読み上げ速度', step: 0.1, min: 0.5, max: 3 },
   { key: 'tts', label: '読み上げ' },
   { key: 'sound', label: '効果音' },
@@ -493,6 +483,30 @@ $('btn-debug').onclick = () => {
   debugOn = !debugOn;
   $('debug').hidden = !debugOn;
   $('btn-debug').setAttribute('aria-pressed', String(debugOn));
+};
+
+// 実機での判定の様子を共有してもらうため、キャリブレーション結果をテキストでコピーする
+$('btn-copy-cal').onclick = async () => {
+  if (!calibration) {
+    alert('まだキャリブレーションしていません');
+    return;
+  }
+  const r = (xs: number[]) => xs.map((x) => Number(x.toPrecision(3)));
+  const summary = {
+    features: ['bsX', 'bsY', 'irisX', 'irisY', 'blink', 'open'],
+    means: Object.fromEntries(ALL_CLASSES.map((c) => [c, r(calibration!.means[c])])),
+    sd: r(calibration.variance.map(Math.sqrt)),
+    quality: Object.fromEntries(ALL_CLASSES.map((c) => [c, Math.round(calibration!.quality[c] * 100)])),
+    settings,
+    ua: navigator.userAgent,
+  };
+  const textOut = JSON.stringify(summary);
+  try {
+    await navigator.clipboard.writeText(textOut);
+    alert('コピーしました。チャットに貼り付けてください。');
+  } catch {
+    prompt('コピーできませんでした。以下を手動でコピーしてください。', textOut);
+  }
 };
 
 const plot = $<HTMLCanvasElement>('debug-plot');
