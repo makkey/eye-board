@@ -251,9 +251,60 @@ function undo() {
 
 // ---- 母音入力 ----
 
+/**
+ * 候補を確定する直前の状態。「戻す」で、確定を取り消して候補の画面にもどれるように残す
+ * （after は確定した後の本文。本文がそこから変わっていたら使わない）
+ */
+interface CommitSnapshot {
+  text: string;
+  after: string;
+  pending: string[];
+  fixed: FixedPart[];
+  shown: string[];
+  cands: Conv[];
+}
+const commitSnapshots: CommitSnapshot[] = [];
+
+function rememberCommit(added: string) {
+  commitSnapshots.push({
+    text,
+    after: text + added,
+    pending: [...pending],
+    fixed: [...fixedParts],
+    shown: [...shown],
+    cands: lastCands,
+  });
+  if (commitSnapshots.length > 50) commitSnapshots.shift();
+}
+
+/** 母音入力の「戻す」：直前に確定した文節があれば、確定を取り消して候補の画面にもどる。無ければ本文を戻す */
+function undoVowel() {
+  const snap = commitSnapshots[commitSnapshots.length - 1];
+  if (!snap || snap.after !== text) {
+    undo();
+    return;
+  }
+  commitSnapshots.pop();
+  if (undoStack[undoStack.length - 1] === snap.text) undoStack.pop();
+  text = snap.text;
+  pending = [...snap.pending];
+  fixedParts = [...snap.fixed];
+  shown = [...snap.shown];
+  lastCands = snap.cands;
+  partialCand = null;
+  renderText();
+  const token = ++convToken; // 確定の後に始まった変換があれば、その返事は使わない
+  conv = 'choosing';
+  engine.openRow(candidateRow(lastCands, token), performance.now());
+  renderKeyboard();
+  inputLog.add('戻す', `候補にもどる（［${pendingView()}］）`);
+  void feedback.say(t('jv.backToCands'));
+}
+
 function applyVowelItem(item: Item) {
   if (conv === 'choosing' && item.kind === 'char') {
     // 変換候補を選んだ：文節を確定して、次の文節の入力へ
+    rememberCommit(item.ch);
     conv = 'idle';
     pending = [];
     setText(text + item.ch);
@@ -309,8 +360,8 @@ function applyVowelItem(item: Item) {
       void feedback.say(text + pendingView() || t('say.empty'), true);
       break;
     case 'undo':
-      undo();
-      break;
+      undoVowel();
+      return;
     default:
       if (pending.length) reject(item, t('jv.convertFirst'));
       else setText(applyItem(text, item));
@@ -352,6 +403,7 @@ function pickPart(k: number) {
   conv = 'idle';
   if (!part) return;
   if (k === 0) {
+    rememberCommit(part.text);
     const rest = pendingSegments().slice(1);
     pending = rest.flatMap((seg, i) => (i ? [' ', ...seg] : seg));
     fixedParts = fixedParts.filter((f) => f.index > 0).map((f) => ({ ...f, index: f.index - 1 }));
@@ -507,7 +559,7 @@ function candidateRow(cands: Conv[], token: number): Row {
 
 $('btn-speak').onclick = () => void feedback.say(text || t('say.empty'), true);
 $('btn-copy').onclick = () => void navigator.clipboard?.writeText(text);
-$('btn-undo').onclick = undo;
+$('btn-undo').onclick = () => (isVowelMode() ? undoVowel() : undo());
 $('btn-clear').onclick = () => setText('');
 
 // ---- キーボード表示 ----
