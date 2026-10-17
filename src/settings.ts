@@ -15,9 +15,10 @@ export const DEFAULT_SETTINGS: Settings = {
   ttsRate: 1.3,
   lang: 'ja',
   jaInput: 'kana',
-  // ラボの測定で、文節ごとの変換の精度・速さ・費用の釣り合いが最も良かった組み合わせ
-  aiProvider: 'gemini',
-  aiModel: 'gemini-3.8-flash',
+  // ラボの文単位の測定と実際の入力（文頭の「生卵」など）で、最も当たりが良かった組み合わせ。
+  // Gemini 3.8 flash は3割ほど安いが、文頭の言葉を思いつけないことが多かった
+  aiProvider: 'openai',
+  aiModel: 'gpt-6.1-sol',
   aiEffort: 'low',
   aiRuns: 1,
   // 文頭の文節は文脈が無く外れやすいので、最初の1文字だけ12キーで正確に入れる
