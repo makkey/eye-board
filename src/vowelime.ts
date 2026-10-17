@@ -4,8 +4,9 @@ import type { AiEffort, AiProvider } from './types';
 
 /**
  * 母音入力の変換（1文節ずつ）。母音ラボ（lab.html）で測った方式をそのまま使う：
- * 指示文 v3（v2 に、1区切り＝ちょうど1文節の決まりを加えたもの）、っ・ー は母音で表す、前の文節までの確定した文を文脈として付ける、
- * 母音が入力と合わない候補は捨てる。
+ * 1文節なら指示文 v2、区切った複数の文節なら v3（v2 に、1区切り＝ちょうど1文節の決まりを加えたもの）。
+ * ラボの文節ごとの測定では、1文節に v3 を使うと母音の合う候補が減り、文頭の文節で正解が5位以内に入らないことが増えたため。
+ * っ・ー は母音で表す、前の文節までの確定した文を文脈として付ける、母音が入力と合わない候補は捨てる。
  */
 
 /** 会社ごとの既定のモデル（ラボで文節ごとの精度が良かったもの） */
@@ -45,9 +46,10 @@ export async function convertPhrase(
   runs = 1,
   exclude: string[] = [],
 ): Promise<string[]> {
-  const prompt = PROMPTS.v3;
   const style = 'fold';
   vowels = vowels.trim().replace(/ +/g, ' ');
+  const multi = vowels.includes(' ');
+  const prompt = multi ? PROMPTS.v3 : PROMPTS.v2;
   let user = userPrompt(context.slice(-CONTEXT_CHARS), vowels);
   if (exclude.length) user += `\n次の候補は違いました。これらとは別の候補を挙げてください：${exclude.join('、')}`;
   const settled = await Promise.allSettled(
@@ -61,19 +63,24 @@ export async function convertPhrase(
       continue;
     }
     try {
-      lists.push(judge(s.value, vowels, '', '', true, style, true).filter((c) => c.valid));
+      lists.push(judge(s.value, vowels, '', '', true, style, multi).filter((c) => c.valid));
     } catch (e) {
       firstError ??= e;
     }
   }
   if (!lists.length) throw firstError instanceof Error ? firstError : new Error(String(firstError));
   const texts: string[] = [];
-  for (const c of mergeRuns(lists, true, true)) {
+  for (const c of mergeRuns(lists, true, multi)) {
     // 文節の中の区切りの空白は本文に入れない
     const text = c.text.replace(/[\s　]+/g, '');
     if (text && !texts.includes(text) && !exclude.includes(text)) texts.push(text);
   }
   return texts.slice(0, TOP_N);
+}
+
+/** 文頭（何も無いか、文の終わりの記号・改行の直後）か。文頭の文節は文脈が無く、いちばん外れやすい */
+export function atSentenceStart(text: string): boolean {
+  return !text.trim() || /[。！？!?\n]\s*$/.test(text);
 }
 
 /** 選んだ会社の API を呼ぶ Generate を作る（各社の呼び出しは使う時に読み込む） */

@@ -15,7 +15,7 @@ import { applyStaticTexts, className, dirName, setLang, t } from './i18n';
 import type { TextKey } from './i18n';
 import { ALL_CLASSES, ALL_DIRS, DIR_ARROW, FLOWER_DIRS } from './types';
 import type { AiEffort, AiProvider, Dir, GazeClass, Item, JaInput, Row, Settings, SideDir } from './types';
-import { DEFAULT_MODELS, PROVIDER_LABELS, convertPhrase, loadKey, providerGenerate, saveKey } from './vowelime';
+import { DEFAULT_MODELS, PROVIDER_LABELS, atSentenceStart, convertPhrase, loadKey, providerGenerate, saveKey } from './vowelime';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -242,7 +242,8 @@ async function startConversion(more: boolean) {
       text,
       vowels,
       providerGenerate(settings.aiProvider, key, model, settings.aiEffort),
-      settings.aiRuns,
+      // 文頭の1文節は文脈が無く外れやすいので、少なくとも2回聞いて候補を広げる（同時に聞くので待ち時間はほぼ同じ）
+      atSentenceStart(text) && !vowels.trim().includes(' ') ? Math.max(2, settings.aiRuns) : settings.aiRuns,
       shown,
     );
     if (token !== convToken) return;

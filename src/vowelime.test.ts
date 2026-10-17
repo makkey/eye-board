@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { convertPhrase } from './vowelime';
+import { atSentenceStart, convertPhrase } from './vowelime';
 import type { Generate } from './vowelime';
 
 const reply = (...cands: [string, string][]) => JSON.stringify({ candidates: cands.map(([reading, text]) => ({ reading, vowels: '', text })) });
@@ -81,5 +81,26 @@ describe('convertPhrase', () => {
     await convertPhrase('今日は', 'ああああおあ あえあい', gen);
     expect(sent[1]).toContain('ここまでの文: 今日は');
     expect(sent[1]).toContain('全部をまとめて');
+  });
+
+  it('1文節は v2、区切った複数の文節は 1区切り＝1文節を厳密にした v3 で聞く', async () => {
+    const systems: string[] = [];
+    const gen: Generate = async (system) => {
+      systems.push(system);
+      return reply(['あめ', '雨']);
+    };
+    await convertPhrase('', 'あえ', gen);
+    await convertPhrase('', 'あえ あえ', gen);
+    expect(systems[0]).not.toContain('ちょうど1つの文節');
+    expect(systems[1]).toContain('ちょうど1つの文節');
+  });
+});
+
+describe('atSentenceStart', () => {
+  it('空か、文の終わりの直後なら文頭', () => {
+    expect(atSentenceStart('')).toBe(true);
+    expect(atSentenceStart('ありがとう。')).toBe(true);
+    expect(atSentenceStart('元気？\n')).toBe(true);
+    expect(atSentenceStart('昨日は')).toBe(false);
   });
 });
