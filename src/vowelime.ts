@@ -1,6 +1,7 @@
 import { PROMPTS, TOP_N, judge, mergeRuns, segmentPrompt, sentencePrompt } from './lab/decode';
 import type { Candidate, JsonSchema } from './lab/decode';
 import { moraKana, morae, normalizeSpaces, rowFamily, toHiragana } from './lab/vowels';
+import { splitPhrase } from './phrases';
 import type { AiEffort, AiProvider } from './types';
 
 /**
@@ -36,11 +37,22 @@ export function userPrompt(context: string, vowels: string): string {
   return `ここまでの文: ${context}\n続きの母音列（空白で区切った複数の文節。次の文節だけでなく、全部をまとめて1つの続きとして候補にしてください）: ${vowels}`;
 }
 
-/** 変換候補。parts は入力の区切りごとの表記と読み（「一部を使う」で合っている文節を選ぶため） */
+/** 候補の一部（入力の区切り、またはその中の文節）。start・len は入力の何拍目（0から）から何拍か */
+export interface Part {
+  text: string;
+  reading: string;
+  start: number;
+  len: number;
+}
+
+/** 変換候補。parts は文節ごとの表記と読み（「一部を使う」で合っている文節を選ぶため） */
 export interface Conv {
   text: string;
-  parts: { text: string; reading: string }[];
+  parts: Part[];
 }
+
+/** 「一部を使う」で並べられる数（← ↖ ↑ ↗ →） */
+const MAX_PARTS = 5;
 
 /** 利用者が「合っている」と選んで固定した区切り（index は0から） */
 export interface FixedPart {
@@ -55,7 +67,7 @@ const compactKana = (s: string) => toHiragana(s).replace(/[\s　]+/g, '');
  * 候補を入力の区切りごとに分ける。読みは拍の数で切り分け、表記は空白の数が区切りの数と同じならそれを使う
  * （合わなければ読みのひらがなを表記の代わりにする）
  */
-export function splitParts(text: string, reading: string, segments: string[]): Conv['parts'] {
+export function splitParts(text: string, reading: string, segments: string[]): { text: string; reading: string }[] {
   const ms = morae(reading);
   const total = segments.reduce((a, s) => a + [...s].length, 0);
   let readings: string[];
@@ -73,6 +85,35 @@ export function splitParts(text: string, reading: string, segments: string[]): C
   const texts = normalizeSpaces(text).split(' ');
   const useTexts = texts.length === segments.length;
   return readings.map((r, i) => ({ text: useTexts ? texts[i] : r, reading: r }));
+}
+
+/**
+ * 候補を文節に分ける。入力の区切りごとに分け、さらに区切りの中を手元で文節に切り分ける
+ * （区切りを入れずに変換しても、明後日｜やろう のように選べるように）。
+ * 切り分けた文節の拍の数が入力と合わない時や、並べきれない時は、入力の区切りのまま
+ */
+export function candidateParts(text: string, reading: string, segments: string[]): Part[] {
+  const bySegment = splitParts(text, reading, segments);
+  const whole: Part[] = [];
+  const fine: Part[] = [];
+  let start = 0;
+  segments.forEach((seg, i) => {
+    const len = [...seg].length;
+    const p = bySegment[i] ?? { text: '', reading: '' };
+    whole.push({ ...p, start, len });
+    let at = start;
+    const pieces = splitPhrase(p.text, p.reading).map((q) => {
+      const n = morae(q.reading)?.length ?? 0;
+      const part = { ...q, start: at, len: n };
+      at += n;
+      return part;
+    });
+    // 拍の数が区切りと合わなければ切り分けない
+    if (at === start + len && pieces.every((q) => q.len > 0)) fine.push(...pieces);
+    else fine.push(whole[whole.length - 1]);
+    start += len;
+  });
+  return fine.length <= MAX_PARTS ? fine : whole;
 }
 
 /** 変換の途中経過（候補が無かった時に、何がはじかれたかを見せるため） */
@@ -172,7 +213,7 @@ export async function convertPhrase(
     // 文節の中の区切りの空白は本文に入れない
     const text = c.text.replace(/[\s　]+/g, '');
     if (!text || out.some((o) => o.text === text) || exclude.includes(text)) continue;
-    out.push({ text, parts: splitParts(c.text, c.reading, segments) });
+    out.push({ text, parts: candidateParts(c.text, c.reading, segments) });
   }
   return out.slice(0, TOP_N);
 }

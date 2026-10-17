@@ -385,36 +385,81 @@ function editPending(next: string[]) {
   setPending(next);
 }
 
-/** 入力中の拍を区切りごとに分ける（区切りの ' ' は含めない） */
-function pendingSegments(): string[][] {
-  const segs: string[][] = [[]];
-  for (const tok of pending) {
-    if (tok === ' ') segs.push([]);
-    else segs[segs.length - 1].push(tok);
+/** 入力中の区切りごとの、最初の拍の位置と拍の数 */
+function segmentSpans(tokens: string[]): { start: number; len: number }[] {
+  const spans: { start: number; len: number }[] = [];
+  let at = 0;
+  let open = false;
+  for (const tok of tokens) {
+    if (tok === ' ') {
+      open = false;
+      continue;
+    }
+    if (!open) spans.push({ start: at, len: 0 });
+    open = true;
+    spans[spans.length - 1].len++;
+    at++;
   }
-  return segs.filter((s) => s.length);
+  return spans;
+}
+
+/** 入力中の拍の、指定した位置（何拍目の前）に区切りを入れる（もう区切ってあれば何もしない） */
+function withBreaks(tokens: string[], at: number[]): string[] {
+  const out: string[] = [];
+  let n = 0;
+  for (const tok of tokens) {
+    if (tok !== ' ') {
+      if (n > 0 && at.includes(n) && out[out.length - 1] !== ' ') out.push(' ');
+      n++;
+    }
+    out.push(tok);
+  }
+  return out;
+}
+
+/**
+ * 区切りが変わった後も、固定していた区切りを指し直す（shift 拍だけ前に詰めた時は shift）。
+ * 拍の範囲が変わった区切りは固定をやめる
+ */
+function remapFixed(before: { start: number; len: number }[], after: string[], shift = 0): FixedPart[] {
+  const spans = segmentSpans(after);
+  return fixedParts.flatMap((f) => {
+    const old = before[f.index];
+    const index = old ? spans.findIndex((s) => s.start === old.start - shift && s.len === old.len) : -1;
+    return index >= 0 ? [{ ...f, index }] : [];
+  });
 }
 
 /**
  * 「一部を使う」で文節 k を選んだ。先頭の文節なら確定して残りを変換し直し、
- * それ以外なら固定して全体を変換し直す
+ * それ以外なら（区切っていなければ前後に区切りを入れて）固定して全体を変換し直す
  */
 function pickPart(k: number) {
   const part = partialCand?.parts[k];
   partialCand = null;
   conv = 'idle';
   if (!part) return;
-  if (k === 0) {
+  const before = segmentSpans(pending);
+  if (part.start === 0) {
     rememberCommit(part.text);
-    const rest = pendingSegments().slice(1);
-    pending = rest.flatMap((seg, i) => (i ? [' ', ...seg] : seg));
-    fixedParts = fixedParts.filter((f) => f.index > 0).map((f) => ({ ...f, index: f.index - 1 }));
+    // 先頭から part.len 拍を取り除く（直後の区切りも）
+    let n = 0;
+    let i = 0;
+    while (i < pending.length && n < part.len) if (pending[i++] !== ' ') n++;
+    while (pending[i] === ' ') i++;
+    const rest = pending.slice(i);
+    fixedParts = remapFixed(before, rest, part.len);
+    pending = rest;
     setText(text + part.text);
     if (pending.length) void startConversion(false);
     else syncKeymap();
     return;
   }
-  fixedParts = [...fixedParts.filter((f) => f.index !== k), { index: k, text: part.text, reading: part.reading }];
+  const next = withBreaks(pending, [part.start, part.start + part.len]);
+  const index = segmentSpans(next).findIndex((s) => s.start === part.start);
+  fixedParts = [...remapFixed(before, next).filter((f) => f.index !== index), { index, text: part.text, reading: part.reading }];
+  pending = next;
+  renderText();
   void startConversion(false);
 }
 

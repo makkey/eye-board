@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { atSentenceStart, convertPhrase as convertFull, headsMatch, slotPrompt, splitParts } from './vowelime';
+import { atSentenceStart, candidateParts, convertPhrase as convertFull, headsMatch, slotPrompt, splitParts } from './vowelime';
 
 const convertPhrase = async (...args: Parameters<typeof convertFull>) => (await convertFull(...args)).map((c) => c.text);
 import type { Generate } from './vowelime';
@@ -147,6 +147,20 @@ describe('一部を使う', () => {
       { text: 'あしたには', reading: 'あしたには' },
       { text: 'いいます', reading: 'いいます' },
     ]);
+  });
+
+  it('区切りの中も文節に分け、何拍目からかを付ける', () => {
+    expect(candidateParts('明後日やろう', 'あさってやろう', ['ああっえああう'])).toEqual([
+      { text: '明後日', reading: 'あさって', start: 0, len: 4 },
+      { text: 'やろう', reading: 'やろう', start: 4, len: 3 },
+    ]);
+    expect(candidateParts('明日には 言います', 'あしたには いいます', ['あいあいあ', 'いいあう']).map((p) => [p.text, p.start, p.len])).toEqual([
+      ['明日には', 0, 5],
+      ['言います', 5, 4],
+    ]);
+    // 6つ以上になるなら、入力の区切りのまま
+    const many = candidateParts('私の 名前は 悟です', 'わたしの なまえは さとるです', ['あああお', 'ああえあ', 'あおうえう']);
+    expect(many.map((p) => p.text)).toEqual(['私の', '名前は', '悟です']);
   });
 
   it('固定した区切りを伝え、そこが違う候補は捨てる', async () => {
