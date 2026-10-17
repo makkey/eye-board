@@ -1,5 +1,5 @@
 import './style.css';
-import { CalibrationRun, stepInstruction } from './calibration';
+import { CalibrationAborted, CalibrationRun, stepInstruction } from './calibration';
 import type { CalProgress } from './calibration';
 import { F_BLINK, classify, classifyDefault, loadCalibration, saveCalibration } from './classifier';
 import type { Calibration, ClassifyResult } from './classifier';
@@ -11,8 +11,10 @@ import { KEYMAPS, flowerIndex, itemLabel, itemSpeech } from './layout';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './settings';
 import { Tracker } from './tracker';
 import type { TrackerFrame } from './tracker';
-import { ALL_CLASSES, ALL_DIRS, DIR_ARROW, DIR_NAME_JA } from './types';
-import type { Dir, GazeClass, Item, Lang, Row, Settings, SideDir } from './types';
+import { applyStaticTexts, className, dirName, setLang, t } from './i18n';
+import type { TextKey } from './i18n';
+import { ALL_CLASSES, ALL_DIRS, DIR_ARROW } from './types';
+import type { Dir, GazeClass, Item, Row, Settings, SideDir } from './types';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -36,12 +38,8 @@ const feedback = new Feedback(settings);
 const tracker = new Tracker($<HTMLVideoElement>('video'));
 tracker.smoothing = settings.smoothing;
 
-/** 読み上げる定型の言葉（入力中の言語で読む） */
-const PHRASES: Record<Lang, { cancel: string; back: string; empty: string; name: string }> = {
-  ja: { cancel: 'キャンセル', back: 'もどる', empty: '何も入力されていません', name: '日本語' },
-  en: { cancel: 'cancel', back: 'back', empty: 'nothing typed', name: 'English' },
-};
-const phrase = () => PHRASES[settings.lang];
+// 画面の言語は入力の言語と同じにする
+setLang(settings.lang);
 
 const engine = new InputEngine(settings, {
   rowCandidate(row, long) {
@@ -70,7 +68,7 @@ const engine = new InputEngine(settings, {
   cancel(reason) {
     spokenItem = spokenRow = null;
     feedback.play('cancel');
-    void feedback.say(reason === 'idle' ? phrase().cancel : phrase().back);
+    void feedback.say(t(reason === 'idle' ? 'say.cancel' : 'say.back'));
     renderKeyboard();
   },
   retract() {
@@ -93,7 +91,7 @@ function setText(next: string) {
 
 function applyToText(item: Item) {
   if (item.kind === 'action' && item.action === 'speak') {
-    void feedback.say(text || phrase().empty, true);
+    void feedback.say(text || t('say.empty'), true);
     return;
   }
   if (item.kind === 'action' && item.action === 'undo') {
@@ -109,7 +107,7 @@ function undo() {
   textEl.value = text;
 }
 
-$('btn-speak').onclick = () => void feedback.say(text || phrase().empty, true);
+$('btn-speak').onclick = () => void feedback.say(text || t('say.empty'), true);
 $('btn-copy').onclick = () => void navigator.clipboard?.writeText(text);
 $('btn-undo').onclick = undo;
 $('btn-clear').onclick = () => setText('');
@@ -146,7 +144,7 @@ function renderKeyboard() {
         const cs = km.closeShort;
         const label = cs.kind === 'row' ? cs.row.label : itemLabel(cs.item);
         const sub = cs.kind === 'row' ? rowSub(cs.row) : closeShortName();
-        keyboardEl.append(keyEl(dir, label, sub, km.closeLong.label, '目を閉じる／下'));
+        keyboardEl.append(keyEl(dir, label, sub, km.closeLong.label, t('key.closeHint')));
       } else {
         const row = km.rowByDir[dir];
         keyboardEl.append(keyEl(dir, row.label, rowSub(row), km.longRowByDir[dir].label, DIR_ARROW[dir]));
@@ -176,7 +174,7 @@ function renderKeyboard() {
   }
   const back = document.createElement('div');
   back.className = 'cell back';
-  back.innerHTML = `<span class="main">目を閉じる／下を見る → もどる</span>`;
+  back.innerHTML = `<span class="main">${t('char.back')}</span>`;
   keyboardEl.append(back);
 }
 
@@ -187,14 +185,14 @@ function keyEl(dir: Dir, label: string, sub: string, longLabel: string, hint: st
   // 「ABCDE」のような長いラベルは小さめに
   const cls = [...label].length > 2 ? 'main small' : 'main';
   el.innerHTML = `<span class="hint">${hint}</span><span class="${cls}">${label}</span>
-    <span class="sub">${sub}</span><span class="long">2秒: ${longLabel}</span>`;
+    <span class="sub">${sub}</span><span class="long">${t('key.long', { label: longLabel })}</span>`;
   return el;
 }
 
 /** 1段目で目を閉じた時に入るものの名前（な行／スペース） */
 function closeShortName(): string {
   const cs = engine.keymap.closeShort;
-  return cs.kind === 'row' ? cs.row.speak : 'スペース';
+  return cs.kind === 'row' ? cs.row.speak : t('key.space');
 }
 
 // ---- 視線インジケータ ----
@@ -202,7 +200,7 @@ const gazeEl = $('gaze');
 const gazeCells = {} as Record<GazeClass, HTMLElement>;
 for (const cls of [...DIR_GRID, 'closed'] as GazeClass[]) {
   const c = document.createElement('div');
-  c.textContent = cls === 'closed' ? '閉／下' : DIR_ARROW[cls];
+  c.textContent = cls === 'closed' ? '' : DIR_ARROW[cls];
   if (cls === 'closed') c.className = 'closed';
   gazeEl.append(c);
   gazeCells[cls] = c;
@@ -214,7 +212,7 @@ const statusSub = $('status-sub');
 const meterFill = $('meter-fill');
 const meterLong = $('meter-long');
 
-function updateView(t: number) {
+function updateView(now: number) {
   // ハイライト
   keyboardEl.querySelectorAll('.hover, .candidate').forEach((el) => el.classList.remove('hover', 'candidate'));
   const cand = engine.candidate;
@@ -241,7 +239,7 @@ function updateView(t: number) {
   let fill = 0;
   let marker: number | null = null;
   if (engine.closedStart !== null) {
-    const dur = t - engine.closedStart;
+    const dur = now - engine.closedStart;
     if (engine.stage === 'row' || engine.closeCanSwitch) {
       // 1段目：0.6秒で な行（スペース）、2秒で 記号
       fill = dur / settings.longMs;
@@ -264,36 +262,37 @@ function updateView(t: number) {
   // 案内文
   let main = '';
   let sub = '';
-  if (mode === 'camera' && tracker.active && t - tracker.lastFrameAt > 2000) {
-    main = '顔認識が止まっています';
+  if (mode === 'camera' && tracker.active && now - tracker.lastFrameAt > 2000) {
+    main = t('st.trackerStopped');
     sub = trackerDiagnostics();
   } else if (mode === 'camera' && !lastFrame?.faceFound) {
-    main = '顔が見つかりません';
-    sub = 'カメラに顔が正面から映るようにしてください';
+    main = t('st.noFace');
+    sub = t('st.noFaceSub');
   } else if (engine.closedStart !== null) {
-    main = '目を閉じています';
+    main = t('st.closed');
     const longName = engine.keymap.closeLong.label;
-    if (!engine.closeDone) sub = `そのまま閉じていると${engine.stage === 'row' ? ` ${closeShortName()}` : '、もどる'}`;
-    else if (engine.closeAction === 'back') sub = 'もどりました。目を開けてください';
-    else if (engine.closeCanSwitch) sub = `${closeShortName()}。そのまま閉じていると ${longName}`;
-    else sub = `${engine.row?.label ?? ''}。目を開けてください`;
+    if (!engine.closeDone) {
+      sub = engine.stage === 'row' ? t('st.keepClosedFor', { name: closeShortName() }) : t('st.keepClosedBack');
+    } else if (engine.closeAction === 'back') sub = t('st.wentBack');
+    else if (engine.closeCanSwitch) sub = t('st.selectedCanSwitch', { name: closeShortName(), long: longName });
+    else sub = t('st.selectedOpen', { name: engine.row?.label ?? '' });
   } else if (engine.stage === 'row') {
     if (cand?.kind === 'row') {
       main = `${cand.row.label}`;
       const longRow = engine.keymap.longRowByDir[engine.dir as SideDir];
-      sub = '画面に視線を戻すと確定' + (cand.long ? '' : `（見続けると ${longRow.label}）`);
+      sub = t('st.confirm') + (cand.long ? '' : t('st.keepLooking', { name: longRow.label }));
     } else {
-      main = '行を選ぶ';
-      sub = `方向を見る → 戻る　／　目を閉じる（下を見る）→ ${closeShortName()}`;
+      main = t('st.chooseRow');
+      sub = t('st.chooseRowSub', { name: closeShortName() });
     }
   } else {
     const row = engine.row!;
     if (cand?.kind === 'item') {
       main = `「${itemLabel(cand.item)}」`;
-      sub = '画面に視線を戻すと確定';
+      sub = t('st.confirm');
     } else {
-      main = `${row.label} — 文字を選ぶ`;
-      sub = '← ↖ ↑ ↗ → を見て戻る　／　目を閉じる（下を見る）→ もどる';
+      main = t('st.chooseItem', { row: row.label });
+      sub = t('st.chooseItemSub');
     }
   }
   statusMain.textContent = main;
@@ -327,15 +326,15 @@ function onTrackerFrame(f: TrackerFrame) {
 tracker.onFrame = onTrackerFrame;
 
 function frameLoop() {
-  const t = performance.now();
+  const now = performance.now();
   if (mode === 'sim' && !calRun) {
     const cls = simClass();
     closedNow = cls === 'closed';
     if (cls !== 'closed') lastOpenDir = cls;
     lastRaw = { cls, distances: {} };
-    engine.update({ t, faceFound: true, dir: lastOpenDir, closed: closedNow });
+    engine.update({ t: now, faceFound: true, dir: lastOpenDir, closed: closedNow });
   }
-  updateView(t);
+  updateView(now);
   requestAnimationFrame(frameLoop);
 }
 
@@ -380,10 +379,13 @@ function setMode(next: typeof mode) {
   engine.reset(performance.now());
   renderedStage = '';
   renderKeyboard();
+  setModeBadge();
+}
+
+function setModeBadge() {
   const badge = $('mode-badge');
   badge.hidden = mode === 'none';
-  badge.textContent =
-    mode === 'sim' ? 'キーボード操作' : calibration ? 'カメラ' : 'カメラ（未キャリブレーション）';
+  badge.textContent = t(mode === 'sim' ? 'mode.sim' : calibration ? 'mode.camera' : 'mode.cameraUncal');
 }
 
 async function startCamera(): Promise<boolean> {
@@ -391,17 +393,19 @@ async function startCamera(): Promise<boolean> {
   if (tracker.active) return true;
   const err = $('start-error');
   try {
-    await tracker.start((msg) => {
+    await tracker.start((step) => {
       err.textContent = '';
-      statusMain.textContent = msg || statusMain.textContent;
-      if (msg) $('btn-start-camera').textContent = msg;
+      if (step === 'ready') return;
+      const msg = t(step === 'camera' ? 'cam.starting' : 'cam.loadingModel');
+      statusMain.textContent = msg;
+      $('btn-start-camera').textContent = msg;
     });
     return true;
   } catch (e) {
     console.error(e);
-    err.textContent = `カメラを開始できませんでした: ${(e as Error).message}`;
+    err.textContent = t('cam.failed', { msg: (e as Error).message });
     $('start').hidden = false;
-    $('btn-start-camera').textContent = 'カメラで始める';
+    $('btn-start-camera').textContent = t('start.camera');
     return false;
   }
 }
@@ -420,22 +424,30 @@ $('btn-start-sim').onclick = () => {
 };
 
 // ---- 言語 ----
-function showLang() {
-  $('btn-lang').textContent = `言語: ${PHRASES[settings.lang].name}`;
+/** 画面の文言を今の言語に揃える */
+function applyTexts() {
+  document.documentElement.lang = settings.lang;
+  applyStaticTexts();
+  gazeCells.closed.textContent = t('gaze.closed');
+  renderKeyboard();
+  if (mode !== 'none') setModeBadge();
+  if ($<HTMLDialogElement>('settings').open) renderSettings();
 }
 
-$('btn-lang').onclick = (e) => {
+function toggleLang(e: Event) {
   // キーボード操作（Space など）でボタンが押されないよう、フォーカスを外す
   (e.currentTarget as HTMLElement).blur();
   settings.lang = settings.lang === 'ja' ? 'en' : 'ja';
   saveSettings(settings);
+  setLang(settings.lang);
   engine.setKeymap(KEYMAPS[settings.lang], performance.now());
-  renderKeyboard();
-  showLang();
+  applyTexts();
   feedback.unlock();
-  void feedback.say(phrase().name);
-};
-showLang();
+  void feedback.say(t('lang.name'));
+}
+
+$('btn-lang').onclick = toggleLang;
+$('btn-start-lang').onclick = toggleLang;
 
 // ---- キャリブレーション ----
 const calibEl = $('calib');
@@ -449,21 +461,18 @@ async function runCalibration() {
   try {
     // スマホでは最初の数秒、顔認識の準備（GPU の初期化など）でフレームが来ないことがある
     $('calib-arrow').textContent = '⏳';
-    $('calib-text').textContent = '顔認識を準備中…';
+    $('calib-text').textContent = t('cal.preparing');
     $('calib-count').textContent = '';
     const ready = await waitForFrames(10, 15000);
-    if (!ready) throw new Error('顔認識が動き始めませんでした。');
+    if (!ready) throw new Error(t('cal.notStarted'));
     calibration = await calRun.run();
     saveCalibration(calibration);
     const weak = ALL_CLASSES.filter((c) => calibration!.quality[c] < 0.8);
     if (weak.length) {
-      alert(
-        `次の区別がつきにくい結果でした：${weak.map(className).join('、')}\n` +
-          '明るさやカメラの位置を変えて、もう一度試すと改善するかもしれません。',
-      );
+      alert(t('cal.weak', { list: weak.map(className).join(settings.lang === 'en' ? ', ' : '、') }));
     }
   } catch (e) {
-    if ((e as Error).message !== '中断しました') alert(`${(e as Error).message}\n\n${trackerDiagnostics()}`);
+    if (!(e instanceof CalibrationAborted)) alert(`${(e as Error).message}\n\n${trackerDiagnostics()}`);
   } finally {
     calRun = null;
     calibEl.hidden = true;
@@ -486,11 +495,11 @@ async function waitForFrames(n: number, timeoutMs: number): Promise<boolean> {
 function trackerDiagnostics(): string {
   const v = $<HTMLVideoElement>('video');
   return [
-    `処理: ${tracker.delegate}`,
-    `処理したフレーム: ${tracker.frames}`,
-    `映像: ${v.videoWidth}×${v.videoHeight}`,
-    `エラー: ${tracker.lastError ?? 'なし'}`,
-    ...(tracker.badFrames ? [`数値にならないフレーム: ${tracker.badFrames}（${tracker.lastBad}）`] : []),
+    `${t('diag.delegate')}: ${tracker.delegate}`,
+    `${t('diag.frames')}: ${tracker.frames}`,
+    `${t('diag.video')}: ${v.videoWidth}×${v.videoHeight}`,
+    `${t('diag.error')}: ${tracker.lastError ?? t('diag.none')}`,
+    ...(tracker.badFrames ? [`${t('diag.bad')}: ${tracker.badFrames} (${tracker.lastBad})`] : []),
   ].join(' / ');
 }
 
@@ -498,7 +507,7 @@ function showCalProgress(p: CalProgress) {
   $('calib-arrow').textContent = p.step === 'closed' ? '😌' : p.step === 'down' ? '↓' : DIR_ARROW[p.step];
   $('calib-text').textContent = stepInstruction(p.step);
   $('calib-fill').style.width = `${p.phase === 'record' ? p.progress * 100 : 0}%`;
-  $('calib-count').textContent = `${p.index + 1} / ${p.total}` + (p.phase === 'record' ? '　記録中…' : '');
+  $('calib-count').textContent = `${p.index + 1} / ${p.total}` + (p.phase === 'record' ? t('cal.recording') : '');
   calibEl.dataset.step = p.step;
 }
 
@@ -506,19 +515,20 @@ $('btn-calibrate').onclick = () => void runCalibration();
 $('btn-calib-cancel').onclick = () => calRun?.abort();
 
 // ---- 設定 ----
-const FIELDS: { key: keyof Settings; label: string; step?: number; min?: number; max?: number }[] = [
-  { key: 'selectMs', label: '候補になるまで（ms）', step: 50, min: 100 },
-  { key: 'longMs', label: '長く見る（わ・゛など）（ms）', step: 100, min: 500 },
-  { key: 'closeMinMs', label: '目を閉じて選択（ms）', step: 50, min: 200 },
-  { key: 'idleMs', label: '無操作キャンセル（ms）', step: 500, min: 1000 },
-  { key: 'debounceMs', label: '揺れの無視（ms）', step: 10, min: 0 },
-  { key: 'smoothing', label: '平滑化（1 = なし）', step: 0.05, min: 0.05, max: 1 },
-  { key: 'hysteresis', label: '方向切替の粘り（小 = 粘る）', step: 0.05, min: 0.3, max: 1 },
-  { key: 'centerBias', label: '中央の広さ（小 = 広い）', step: 0.05, min: 0.2, max: 3 },
-  { key: 'closedBias', label: '閉じた判定の広さ（小 = 閉じたと判定しやすい）', step: 0.05, min: 0.1, max: 3 },
-  { key: 'ttsRate', label: '読み上げ速度', step: 0.1, min: 0.5, max: 3 },
-  { key: 'tts', label: '読み上げ' },
-  { key: 'sound', label: '効果音' },
+// label は i18n の 'set.<key>'
+const FIELDS: { key: keyof Settings; step?: number; min?: number; max?: number }[] = [
+  { key: 'selectMs', step: 50, min: 100 },
+  { key: 'longMs', step: 100, min: 500 },
+  { key: 'closeMinMs', step: 50, min: 200 },
+  { key: 'idleMs', step: 500, min: 1000 },
+  { key: 'debounceMs', step: 10, min: 0 },
+  { key: 'smoothing', step: 0.05, min: 0.05, max: 1 },
+  { key: 'hysteresis', step: 0.05, min: 0.3, max: 1 },
+  { key: 'centerBias', step: 0.05, min: 0.2, max: 3 },
+  { key: 'closedBias', step: 0.05, min: 0.1, max: 3 },
+  { key: 'ttsRate', step: 0.1, min: 0.5, max: 3 },
+  { key: 'tts' },
+  { key: 'sound' },
 ];
 
 function renderSettings() {
@@ -544,7 +554,7 @@ function renderSettings() {
       tracker.smoothing = settings.smoothing;
       saveSettings(settings);
     };
-    label.append(f.label, input);
+    label.append(t(`set.${f.key}` as TextKey), input);
     box.append(label);
   }
 }
@@ -554,7 +564,8 @@ $('btn-settings').onclick = () => {
   $<HTMLDialogElement>('settings').showModal();
 };
 $('btn-reset-settings').onclick = () => {
-  Object.assign(settings, DEFAULT_SETTINGS);
+  // 言語は既定値に戻さない
+  Object.assign(settings, DEFAULT_SETTINGS, { lang: settings.lang });
   tracker.smoothing = settings.smoothing;
   saveSettings(settings);
   renderSettings();
@@ -576,7 +587,7 @@ $('btn-debug').onclick = () => {
 // 実機での判定の様子を共有してもらうため、キャリブレーション結果をテキストでコピーする
 $('btn-copy-cal').onclick = async () => {
   if (!calibration) {
-    alert('まだキャリブレーションしていません');
+    alert(t('copy.noCal'));
     return;
   }
   const r = (xs: number[]) => xs.map((x) => Number(x.toPrecision(3)));
@@ -591,9 +602,9 @@ $('btn-copy-cal').onclick = async () => {
   const textOut = JSON.stringify(summary);
   try {
     await navigator.clipboard.writeText(textOut);
-    alert('コピーしました。チャットに貼り付けてください。');
+    alert(t('copy.done'));
   } catch {
-    prompt('コピーできませんでした。以下を手動でコピーしてください。', textOut);
+    prompt(t('copy.manual'), textOut);
   }
 };
 
@@ -648,16 +659,16 @@ function drawDebug() {
   const fmt = (x: number) => x.toFixed(3).padStart(7);
   const dist = lastRaw?.distances ?? {};
   debugText.textContent = [
-    `mode       ${mode}${calibration ? '' : '（未キャリブレーション）'}`,
-    `顔認識     ${trackerDiagnostics()}`,
+    `mode       ${mode}${calibration ? '' : t('dbg.uncal')}`,
+    `${t('dbg.tracker').padEnd(10)} ${trackerDiagnostics()}`,
     `face       ${f?.faceFound ?? '-'}`,
     `bs  x,y    ${f ? fmt(f.feature[0]) + fmt(f.feature[1]) : '-'}`,
     `iris x,y   ${f ? fmt(f.feature[2]) + fmt(f.feature[3]) : '-'}`,
-    `blink,開き ${f ? fmt(f.feature[F_BLINK]) + fmt(f.feature[5]) : '-'}`,
-    `判定       ${lastRaw ? className(lastRaw.cls) : '-'}　安定 ${DIR_NAME_JA[engine.dir]}`,
+    `blink,open ${f ? fmt(f.feature[F_BLINK]) + fmt(f.feature[5]) : '-'}`,
+    `${t('dbg.class').padEnd(10)} ${lastRaw ? className(lastRaw.cls) : '-'} / ${t('dbg.stable')} ${dirName(engine.dir)}`,
     `stage      ${engine.stage}${engine.row ? ' ' + engine.row.label : ''}`,
     '',
-    'クラス  距離   キャリブ精度',
+    t('dbg.header'),
     ...ALL_CLASSES.map(
       (c) =>
         `${className(c).padEnd(3, '　')} ${dist[c] !== undefined ? dist[c]!.toFixed(1).padStart(6) : '     -'}` +
@@ -666,10 +677,6 @@ function drawDebug() {
   ].join('\n');
 }
 
-function className(c: GazeClass): string {
-  return c === 'closed' ? '閉じる' : DIR_NAME_JA[c];
-}
-
 // ---- 起動 ----
-renderKeyboard();
+applyTexts();
 requestAnimationFrame(frameLoop);

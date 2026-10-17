@@ -96,6 +96,7 @@ button[aria-pressed='true'] {
 /* 出力 */
 .output textarea {
   width: 100%;
+  font-family: inherit;
   min-height: 5.5em;
   font-size: clamp(1.4rem, 5vw, 2rem);
   line-height: 1.4;

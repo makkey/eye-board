@@ -1,4 +1,5 @@
-import { ALL_CLASSES, DIR_NAME_JA } from './types';
+import { className, t } from './i18n';
+import { ALL_CLASSES } from './types';
 import type { GazeClass } from './types';
 
 /**
@@ -91,8 +92,7 @@ function median(xs: number[]): number {
 export function buildCalibration(samples: Record<GazeClass, Feature[]>): Calibration {
   for (const cls of ALL_CLASSES) {
     if (!samples[cls] || samples[cls].length < 3) {
-      const name = cls === 'closed' ? '目を閉じる' : DIR_NAME_JA[cls];
-      throw new Error(`「${name}」の記録がほとんど取れませんでした（${samples[cls]?.length ?? 0} フレーム）。`);
+      throw new Error(t('cal.fewSamples', { name: className(cls), n: samples[cls]?.length ?? 0 }));
     }
   }
 

@@ -2,7 +2,8 @@ import { buildCalibration } from './classifier';
 import type { Calibration, Feature } from './classifier';
 import type { Feedback } from './feedback';
 import type { TrackerFrame } from './tracker';
-import { ALL_CLASSES, DIR_NAME_JA } from './types';
+import { dirName, getLang, t } from './i18n';
+import { ALL_CLASSES } from './types';
 import type { GazeClass } from './types';
 
 /** 'down' は「下を見る」。カメラからは目を閉じたのと区別できないので、'closed' として記録する */
@@ -14,11 +15,14 @@ const SETTLE_MS = 700;
 const RECORD_MS = 1500;
 
 export function stepInstruction(step: CalStep): string {
-  if (step === 'C') return '画面の中央を見てください';
-  if (step === 'closed') return '目を閉じてください。音が鳴ったら開けてください';
-  if (step === 'down') return '下を見てください';
-  return `${DIR_NAME_JA[step]}を見てください`;
+  if (step === 'C') return t('cal.center');
+  if (step === 'closed') return t('cal.closed');
+  if (step === 'down') return t('cal.down');
+  return t('cal.look', { dir: dirName(step) });
 }
+
+/** 利用者が中止した */
+export class CalibrationAborted extends Error {}
 
 export interface CalProgress {
   index: number;
@@ -67,13 +71,14 @@ export class CalibrationRun {
   }
 
   async run(): Promise<Calibration> {
-    await this.feedback.say('キャリブレーションを始めます。顔は動かさず、目だけを大きく動かしてください。', true, 'ja');
+    // 案内は画面と同じ言語で読む
+    await this.feedback.say(t('cal.intro'), true, getLang());
     for (let i = 0; i < STEPS.length; i++) {
       const step = STEPS[i];
       const base = { index: i, total: STEPS.length, step };
       this.check();
       this.onProgress({ ...base, phase: 'announce', progress: 0 });
-      await this.feedback.say(stepInstruction(step), true, 'ja');
+      await this.feedback.say(stepInstruction(step), true, getLang());
       this.check();
       this.onProgress({ ...base, phase: 'settle', progress: 0 });
       await sleep(step === 'closed' ? SETTLE_MS + 300 : SETTLE_MS);
@@ -89,17 +94,17 @@ export class CalibrationRun {
       this.feedback.play('done');
     }
     if (this.seen === 0) {
-      throw new Error('カメラの映像を顔認識に渡せていません。');
+      throw new Error(t('cal.noFrames'));
     }
     if (this.missed / this.seen > 0.5) {
-      throw new Error('顔を見失うことが多すぎました。カメラの位置や明るさを確認してください。');
+      throw new Error(t('cal.lostFace'));
     }
     const cal = buildCalibration(this.samples);
-    await this.feedback.say('キャリブレーションが完了しました', true, 'ja');
+    await this.feedback.say(t('cal.done'), true, getLang());
     return cal;
   }
 
   private check() {
-    if (this.aborted) throw new Error('中断しました');
+    if (this.aborted) throw new CalibrationAborted();
   }
 }

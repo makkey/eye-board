@@ -49,8 +49,9 @@ export class Tracker {
     this.video = video;
   }
 
-  async start(onStatus: (msg: string) => void) {
-    onStatus('カメラを起動中…');
+  /** onStatus には進み具合（'camera' → 'model' → 'ready'）を渡す。文言は呼び出し側で決める */
+  async start(onStatus: (step: 'camera' | 'model' | 'ready') => void) {
+    onStatus('camera');
     this.stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
       audio: false,
@@ -59,7 +60,7 @@ export class Tracker {
     await this.video.play();
 
     if (!this.landmarker) {
-      onStatus('顔認識モデルを読み込み中…');
+      onStatus('model');
       try {
         this.landmarker = await createLandmarker('GPU');
         this.delegate = 'GPU';
@@ -69,7 +70,7 @@ export class Tracker {
         this.delegate = 'CPU';
       }
     }
-    onStatus('');
+    onStatus('ready');
     this.running = true;
     this.schedule();
   }
@@ -141,7 +142,7 @@ export class Tracker {
       if (lm) {
         // 顔はあるのに特徴量が数値にならない：平滑化に NaN が混ざると以後ずっと NaN になるので捨てる
         this.badFrames++;
-        this.lastBad = `ランドマーク ${lm.length} / blendshape ${bs?.length ?? 0} / 特徴量 ${raw?.map((x) => x.toFixed(2)).join(',') ?? '-'}`;
+        this.lastBad = `landmarks ${lm.length} / blendshapes ${bs?.length ?? 0} / features ${raw?.map((x) => x.toFixed(2)).join(',') ?? '-'}`;
       }
       this.onFrame({ t, faceFound: false, feature: this.smoothed ?? [0, 0, 0, 0, 0, 0] });
     }

@@ -134,7 +134,7 @@ const EN: Record<string, Row> = {
   },
   edit: {
     id: 'en-edit',
-    label: '編集',
+    label: 'Edit',
     speak: 'edit',
     items: [
       a('backspace', '⌫Del', 'delete'),

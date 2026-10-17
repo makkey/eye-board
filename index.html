@@ -7,33 +7,34 @@
     <title>EyeBoard</title>
   </head>
   <body>
+    <!-- 文言は data-i18n 系の属性で src/i18n.ts から差し込む（言語の切り替えで入れ替わる） -->
     <header class="topbar">
       <h1>EyeBoard</h1>
       <span id="mode-badge" class="badge" hidden></span>
       <nav>
-        <button id="btn-lang" type="button" aria-label="入力する言語を切り替える">言語: 日本語</button>
-        <button id="btn-calibrate" type="button">キャリブレーション</button>
-        <button id="btn-debug" type="button" aria-pressed="false">デバッグ</button>
-        <button id="btn-settings" type="button">設定</button>
+        <button id="btn-lang" type="button" data-i18n="nav.lang" data-i18n-aria="nav.langAria"></button>
+        <button id="btn-calibrate" type="button" data-i18n="nav.calibrate"></button>
+        <button id="btn-debug" type="button" aria-pressed="false" data-i18n="nav.debug"></button>
+        <button id="btn-settings" type="button" data-i18n="nav.settings"></button>
       </nav>
     </header>
 
     <main class="app">
       <section class="output">
-        <textarea id="text" readonly aria-label="入力したテキスト" placeholder="ここに入力されます"></textarea>
+        <textarea id="text" readonly data-i18n-aria="text.aria" data-i18n-placeholder="text.placeholder"></textarea>
         <div class="output-actions">
-          <button id="btn-speak" type="button">🔊 読み上げ</button>
-          <button id="btn-copy" type="button">コピー</button>
-          <button id="btn-undo" type="button">元に戻す</button>
-          <button id="btn-clear" type="button">全消去</button>
+          <button id="btn-speak" type="button" data-i18n="btn.speak"></button>
+          <button id="btn-copy" type="button" data-i18n="btn.copy"></button>
+          <button id="btn-undo" type="button" data-i18n="btn.undo"></button>
+          <button id="btn-clear" type="button" data-i18n="btn.clear"></button>
         </div>
       </section>
 
       <section class="status">
         <div id="camera-preview" class="camera-preview" hidden><video id="video" playsinline muted></video></div>
-        <div id="gaze" class="gaze" aria-label="現在の視線方向"></div>
+        <div id="gaze" class="gaze" data-i18n-aria="gaze.aria"></div>
         <div class="status-text">
-          <div id="status-main" class="status-main">準備中</div>
+          <div id="status-main" class="status-main" data-i18n="status.ready"></div>
           <div id="status-sub" class="status-sub"></div>
           <div class="meter" aria-hidden="true"><div id="meter-fill"></div><div id="meter-long"></div></div>
         </div>
@@ -45,33 +46,24 @@
         <canvas id="debug-plot" width="360" height="360"></canvas>
         <div>
           <pre id="debug-text"></pre>
-          <button id="btn-copy-cal" type="button">キャリブレーション結果をコピー</button>
+          <button id="btn-copy-cal" type="button" data-i18n="debug.copyCal"></button>
         </div>
       </section>
 
       <details class="help">
-        <summary>使い方</summary>
-        <ol>
-          <li>顔がカメラに正面から映るように置き、<b>キャリブレーション</b>を行います（音声で案内します）。</li>
-          <li>行を選ぶ：↖ あ・↑ か・↗ さ・← た・→ は を見る（約0.4秒）→ 読み上げを聞いたら<b>画面に視線を戻す</b>と確定。</li>
-          <li>同じ方向を<b>2秒</b>見続けると ↖ ま・↑ や・↗ ら・← わ・→ 編集。</li>
-          <li><b>目を閉じる（または下を見る）</b>：0.6秒で「な行」、そのまま2秒で「記号」。読み上げを聞いたら目を開けます。</li>
-          <li>文字を選ぶ：<b>左から時計回りに あ・い・う・え・お</b>（← ↖ ↑ ↗ →）。見て戻ると確定。</li>
-          <li>何も選ばずに戻る：2段目で<b>目を閉じる（下を見る）</b>。5秒何もしなくても戻ります。</li>
-        </ol>
-        <p>英語（右上の「言語」で切り替え）：↖ ABCDE・↑ FGHIJ・↗ KLMNO・← PQRST・→ UVWXY。2秒で ↖ 1–5・↑ 6–0・↗ !-:;"・← ()/@&・→ 編集。目を閉じる（下を見る）とスペース、そのまま2秒で .,?'Z。文頭と単独の i は自動で大文字。</p>
-        <p>シミュレーション：<kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd>/<kbd>A</kbd><kbd>D</kbd>（または矢印キー）を押している間その方向を見ている扱い、<kbd>Space</kbd>（または<kbd>X</kbd>・<kbd>↓</kbd>）で目を閉じる。</p>
-        <p>映像は端末内でのみ処理され、送信されません。</p>
+        <summary data-i18n="help.summary"></summary>
+        <div data-i18n-html="help.body"></div>
       </details>
     </main>
 
     <div id="start" class="overlay">
       <div class="card">
         <h2>EyeBoard</h2>
-        <p>目を大きく動かして、12キー配列でひらがなを入力します。<br />画面から目をそらして使うので、<b>音声の案内</b>を聞きながら操作します。</p>
+        <p data-i18n-html="start.desc"></p>
         <div class="card-actions">
-          <button id="btn-start-camera" type="button" class="primary">カメラで始める</button>
-          <button id="btn-start-sim" type="button">キーボードで試す</button>
+          <button id="btn-start-camera" type="button" class="primary" data-i18n="start.camera"></button>
+          <button id="btn-start-sim" type="button" data-i18n="start.sim"></button>
+          <button id="btn-start-lang" type="button" data-i18n="start.otherLang"></button>
         </div>
         <p id="start-error" class="error" role="alert"></p>
       </div>
@@ -83,18 +75,18 @@
         <div id="calib-text" class="calib-text"></div>
         <div class="meter"><div id="calib-fill"></div></div>
         <div id="calib-count" class="status-sub"></div>
-        <button id="btn-calib-cancel" type="button">中止</button>
+        <button id="btn-calib-cancel" type="button" data-i18n="calib.stop"></button>
       </div>
     </div>
 
     <dialog id="settings">
       <form method="dialog">
-        <h2>設定</h2>
+        <h2 data-i18n="settings.title"></h2>
         <div id="settings-fields" class="settings-fields"></div>
         <div class="card-actions">
-          <button id="btn-reset-settings" type="button">既定値に戻す</button>
-          <button id="btn-forget-cal" type="button">キャリブレーションを削除</button>
-          <button value="close" class="primary">閉じる</button>
+          <button id="btn-reset-settings" type="button" data-i18n="settings.reset"></button>
+          <button id="btn-forget-cal" type="button" data-i18n="settings.forgetCal"></button>
+          <button value="close" class="primary" data-i18n="settings.close"></button>
         </div>
       </form>
     </dialog>

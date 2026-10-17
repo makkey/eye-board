@@ -26,14 +26,6 @@ export const DIR_ARROW: Record<Dir, string> = {
   R: '→',
 };
 
-export const DIR_NAME_JA: Record<Dir, string> = {
-  C: '中央',
-  UL: '左上',
-  U: '上',
-  UR: '右上',
-  L: '左',
-  R: '右',
-};
 
 export type Action =
   | 'cycle' // ゛゜小 を順に切り替え
