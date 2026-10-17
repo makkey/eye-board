@@ -451,7 +451,9 @@ function pickPart(k: number) {
     fixedParts = remapFixed(before, rest, part.len);
     pending = rest;
     setText(text + part.text);
-    if (pending.length) void startConversion(false);
+    // もう見せた候補のうち、選んだ文節で始まるものの続きは違うと分かっているので、続きの候補から除く
+    const wrongRest = shown.filter((c) => c.startsWith(part.text) && c.length > part.text.length).map((c) => c.slice(part.text.length));
+    if (pending.length) void startConversion(false, wrongRest);
     else syncKeymap();
     return;
   }
@@ -460,7 +462,8 @@ function pickPart(k: number) {
   fixedParts = [...remapFixed(before, next).filter((f) => f.index !== index), { index, text: part.text, reading: part.reading }];
   pending = next;
   renderText();
-  void startConversion(false);
+  // 母音は同じなので、もう見せた候補（固定した文節以外が違っていたもの）は除いて、ほかの文節を変えた候補を聞く
+  void startConversion(false, shown);
 }
 
 /** 候補の文節を ← ↖ ↑ ↗ → に並べた2段目（最大5つ） */
@@ -477,11 +480,17 @@ function say(msg: string) {
   void feedback.say(msg, true);
 }
 
+/** 違うと分かっている候補を AI に伝える数（多すぎると問い合わせが長くなる） */
+const MAX_EXCLUDE = 30;
+
 /** 「変換中」の間の2段目（選べるものはない。目を閉じるとやめる） */
 const WAIT_ROW: Row = { id: 'jv-wait', label: t('jv.waiting'), speak: '', items: [null, null, null, null, null], noIdle: true };
 
-/** more：今の母音で、まだ見せていない別の候補を聞く */
-async function startConversion(more: boolean) {
+/**
+ * more：今の母音で、まだ見せていない別の候補を聞く。
+ * exclude：新しく変換する時に、違うと分かっている候補（「一部を使う」の前に見せた候補など）
+ */
+async function startConversion(more: boolean, exclude: string[] = []) {
   const vowels = pendingVowels();
   // 何も入れずに目を閉じた時は何もしない（閉じ続けて記号を出す途中でもあるので、案内も出さない）
   if (!vowels.trim()) return;
@@ -494,7 +503,7 @@ async function startConversion(more: boolean) {
   conv = 'waiting';
   convStartedAt = performance.now();
   notice = null;
-  if (!more) shown = [];
+  if (!more) shown = exclude.slice(-MAX_EXCLUDE);
   // 変換が始まった：目を閉じたまま待っても記号に切り替えない（記号は入力中の拍が無い時だけ）
   if (!more) engine.holdClose();
   engine.openRow({ ...WAIT_ROW, label: t('jv.waiting') }, performance.now());
@@ -513,7 +522,7 @@ async function startConversion(more: boolean) {
       more ? '別の候補' : '変換',
       `［${pendingView()}］ 文脈「${text.slice(-20)}」 ${settings.aiProvider}:${model} 深さ ${effort} ×${runs}` +
         (fixedParts.length ? ` 固定 ${fixedParts.map((f) => `${f.index + 1}:${f.text}`).join('・')}` : '') +
-        (more ? ` 除外 ${shown.length}件` : ''),
+        (shown.length ? ` 除外 ${shown.length}件` : ''),
     );
     let retried = false;
     let cands = await convertPhrase(text, vowels, generate, runs, shown, heads, info, '', fixedParts);
