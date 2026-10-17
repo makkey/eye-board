@@ -320,7 +320,12 @@ interface Task {
   goldText: string;
   /** 文節ごとの時、何文目か（文全体の正解率の集計用） */
   sentence: number;
+  /** 文節ごとの時、前の文節までの正解（確定済みとして一緒に送る文脈。文頭は空） */
+  context?: string;
 }
+
+/** 結果の表で「何を送ったか」を見せる（文節ごとの時は文脈も） */
+const sentLabel = (r: Task) => (r.context === undefined ? r.vowels : `${r.context || '（文頭）'} ＋ ${r.vowels}`);
 
 interface TaskResult extends Task {
   /** 採点・表示に使う上位 TOP_N 個 */
@@ -371,7 +376,7 @@ function buildTasks(mode: string, limit: number, style: VowelStyle): Task[] {
       const vowels = toVowels(reading, style);
       if (!vowels) return;
       const context = s.surfaces.slice(0, j).join('');
-      tasks.push({ vowels, user: segmentPrompt(context, vowels), goldReading: reading, goldText: s.surfaces[j], sentence: i });
+      tasks.push({ vowels, user: segmentPrompt(context, vowels), goldReading: reading, goldText: s.surfaces[j], sentence: i, context });
     });
   });
   return tasks;
@@ -550,7 +555,7 @@ function renderDetail() {
     if (r.candidates[0]?.correct) tr.className = 'hit';
     else if (r.candidates.some((c) => c.correct)) tr.className = 'near';
     const cells = [
-      r.vowels,
+      sentLabel(r),
       r.goldText,
       r.pending ? '（待ち）' : r.error ? `エラー：${r.error}` : r.candidates.map(candidateText).join('　'),
       r.ms ? (r.ms / 1000).toFixed(1) : '-',
@@ -572,7 +577,7 @@ $('btn-copy').onclick = async () => {
   if (lastRun.length) {
     lines.push('', '# 直近の実行（✓正解 ✗母音が合わない）');
     for (const r of lastRun.filter((x) => !x.pending)) {
-      lines.push(`${r.vowels} | ${r.goldText} | ${r.error ? `エラー：${r.error}` : r.candidates.map(candidateText).join(' ')}`);
+      lines.push(`${sentLabel(r)} | ${r.goldText} | ${r.error ? `エラー：${r.error}` : r.candidates.map(candidateText).join(' ')}`);
     }
   }
   const text = lines.join('\n');
