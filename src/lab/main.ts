@@ -226,7 +226,7 @@ async function ask(user: string, vowels: string, goldReading: string, goldText: 
   for (const raw of raws) {
     try {
       // v2 は母音が合わない候補（必ず不正解）を捨てる。受け取った数は別に数えておく
-      const all = judge(raw, vowels, goldReading, goldText, t.prompt.validFirst, t.style);
+      const all = judge(raw, vowels, goldReading, goldText, t.prompt.validFirst, t.style, t.prompt.exactFirst);
       received += all.length;
       receivedValid += all.filter((c) => c.valid).length;
       runs.push(t.prompt.validFirst ? all.filter((c) => c.valid) : all);
@@ -235,7 +235,7 @@ async function ask(user: string, vowels: string, goldReading: string, goldText: 
     }
   }
   if (!runs.length) throw firstError;
-  return { all: mergeRuns(runs, t.prompt.validFirst), single: runs[0], received, receivedValid, ms, raws, inputTokens, outputTokens };
+  return { all: mergeRuns(runs, t.prompt.validFirst, t.prompt.exactFirst), single: runs[0], received, receivedValid, ms, raws, inputTokens, outputTokens };
 }
 
 // ---- 試し入力 ----

@@ -93,6 +93,29 @@ describe('mergeRuns', () => {
   });
 });
 
+describe('区切り位置', () => {
+  it('v3 は区切り位置まで合う候補を先にする', () => {
+    const r = JSON.stringify({
+      candidates: [
+        { reading: 'あさから そば たべたい', vowels: '', text: '朝から 蕎麦 食べたい' },
+        { reading: 'なまたまごが たべたい', vowels: '', text: '生卵が 食べたい' },
+      ],
+    });
+    const loose = judge(r, 'ああああおあ あえあい', '', '', true, 'fold');
+    expect(loose.map((c) => [c.valid, c.exact])).toEqual([
+      [true, false],
+      [true, true],
+    ]);
+    const strict = judge(r, 'ああああおあ あえあい', '', '', true, 'fold', true);
+    expect(strict[0].text).toBe('生卵が 食べたい');
+  });
+
+  it('v3 の指示には1区切り＝1文節の決まりがある', () => {
+    expect(PROMPTS.v3.system('fold')).toContain('ちょうど1つの文節');
+    expect(PROMPTS.v2.system('fold')).not.toContain('ちょうど1つの文節');
+  });
+});
+
 describe('PROMPTS', () => {
   it('v2 の例は規則どおりの母音になっている', () => {
     for (const style of ['mark', 'fold'] as const) {

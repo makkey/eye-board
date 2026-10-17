@@ -1,8 +1,14 @@
 import { normalizeSpaces, stripPunctuation, toHiragana, toVowels } from './vowels';
 import type { VowelStyle } from './vowels';
 
-/** 母音の規則（v1・v2 共通） */
-function rules(style: VowelStyle): string {
+/** 空白（文節の区切り）の意味。v3 は1区切り＝ちょうど1文節と厳密にする */
+const LOOSE_SEGMENTS = '- 空白は文節の区切りです（主に助詞の後ろ）。';
+const STRICT_SEGMENTS = `- 空白は文節の区切りです。区切りと区切りの間は、ちょうど1つの文節（名詞・動詞などの自立語1つと、その後ろに付く助詞・助動詞）です。
+  例：「あめが ふって います」は3つの文節です。「けさからあめ ふって」のように1つの区切りに2つの文節（けさから／あめ）を入れたり、1つの文節を2つに分けたりした候補は出さないでください。
+- 候補の reading には、入力と同じ数・同じ位置に空白を入れてください（区切りごとの拍の数も入力と同じになります）。`;
+
+/** 母音の規則（全版共通。strict は文節の区切りを厳密にする） */
+function rules(style: VowelStyle, strict = false): string {
   const special =
     style === 'fold'
       ? `- 「ん」はそのまま入力されます。
@@ -16,7 +22,7 @@ function rules(style: VowelStyle): string {
 - 拗音（きゃ・しゅ・ちょ など）は1拍で、ゃ→あ、ゅ→う、ょ→お です。
 ${special}
 - 母音は書いたかなの通りです。助詞の「は」は あ、「を」は お、「へ」は え。「とう」「こう」は お う、「せい」は え い。
-- 空白は文節の区切りです（主に助詞の後ろ）。`;
+${strict ? STRICT_SEGMENTS : LOOSE_SEGMENTS}`;
 }
 
 /** v1：規則だけを伝える */
@@ -34,13 +40,13 @@ const V2_EXAMPLES: [string, string][] = [
   ['おちゃを のみたい', 'お茶を 飲みたい'],
 ];
 
-/** v2：例と自己確認を加え、候補を多めに出させる（母音が合わないものは受け取った側で捨てる） */
-const systemV2 = (style: VowelStyle) => {
+/** v2：例と自己確認を加え、候補を多めに出させる（母音が合わないものは受け取った側で捨てる）。v3 は区切りを厳密に */
+const systemV2 = (style: VowelStyle, strict = false) => {
   const examples = V2_EXAMPLES.map(([reading, text]) => {
     const v = toVowels(reading, style);
     return `- 「${v}」→ reading「${reading}」、vowels「${v}」、text「${text}」`;
   }).join('\n');
-  return `${rules(style)}
+  return `${rules(style, strict)}
 
 入力された母音列に当てはまる、日常会話として自然な日本語を、可能性が高い順に最大10個挙げてください。
 
@@ -82,7 +88,7 @@ function candidatesSchema(fields: string[]) {
 }
 
 export type JsonSchema = ReturnType<typeof candidatesSchema>;
-export type PromptId = 'v1' | 'v2';
+export type PromptId = 'v1' | 'v2' | 'v3';
 
 export interface PromptVersion {
   id: PromptId;
@@ -92,6 +98,8 @@ export interface PromptVersion {
   schema: JsonSchema;
   /** 受け取った候補を、母音が合うものを先に並べ替えるか */
   validFirst: boolean;
+  /** 母音が合う候補の中で、文節の区切り位置まで入力と同じものを先にするか */
+  exactFirst?: boolean;
 }
 
 /** 指示文の版（system は全リクエストで同じ。先頭に固定しておくとキャッシュが効く） */
@@ -103,6 +111,14 @@ export const PROMPTS: Record<PromptId, PromptVersion> = {
     system: systemV2,
     schema: candidatesSchema(['reading', 'vowels', 'text']),
     validFirst: true,
+  },
+  v3: {
+    id: 'v3',
+    label: 'v3（v2＋1区切り＝1文節を厳密に・区切り位置まで合う候補を先に）',
+    system: (style) => systemV2(style, true),
+    schema: candidatesSchema(['reading', 'vowels', 'text']),
+    validFirst: true,
+    exactFirst: true,
   },
 };
 
@@ -120,8 +136,10 @@ export function segmentPrompt(context: string, vowels: string): string {
 export interface Candidate {
   text: string;
   reading: string;
-  /** reading の母音が入力と一致するか */
+  /** reading の母音が入力と一致するか（文節の区切り位置は問わない） */
   valid: boolean;
+  /** 区切り位置まで入力と一致するか */
+  exact: boolean;
   /** 正解と一致するか */
   correct: boolean;
 }
@@ -140,9 +158,11 @@ export function judge(
   goldText: string,
   validFirst = false,
   style: VowelStyle = 'mark',
+  exactFirst = false,
 ): Candidate[] {
   const json = parseCandidates(raw);
-  const want = inputVowels.replace(/ /g, '');
+  const wantExact = normalizeSpaces(inputVowels);
+  const want = wantExact.replace(/ /g, '');
   const all = (json.candidates ?? []).map((c) => {
     const text = String(c.text ?? '');
     const reading = String(c.reading ?? '');
@@ -152,6 +172,7 @@ export function judge(
       reading,
       // 文節の区切り位置の違いは許す（母音の並びが合っていればよい）
       valid: v !== null && v.replace(/ /g, '') === want,
+      exact: v !== null && normalizeSpaces(v) === wantExact,
       correct: (!!goldReading && compact(reading) === compact(goldReading)) || (!!goldText && compact(text) === compact(goldText)),
     };
   });
@@ -163,7 +184,9 @@ export function judge(
     seen.add(k);
     return true;
   });
-  return [...unique.filter((c) => c.valid), ...unique.filter((c) => !c.valid)];
+  const valid = unique.filter((c) => c.valid);
+  const ordered = exactFirst ? [...valid.filter((c) => c.exact), ...valid.filter((c) => !c.exact)] : valid;
+  return [...ordered, ...unique.filter((c) => !c.valid)];
 }
 
 /**
@@ -172,7 +195,7 @@ export function judge(
  * 下位まで均等に点を配ると、どの回でも中位に出る候補が、何回かで1位になった候補を追い越してしまうため、上位を重く見る。
  * validFirst の時は母音が合う候補を先に置く。
  */
-export function mergeRuns(runs: Candidate[][], validFirst: boolean): Candidate[] {
+export function mergeRuns(runs: Candidate[][], validFirst: boolean, exactFirst = false): Candidate[] {
   if (runs.length === 1) return runs[0];
   const merged = new Map<string, { c: Candidate; score: number; first: number }>();
   let order = 0;
@@ -186,7 +209,13 @@ export function mergeRuns(runs: Candidate[][], validFirst: boolean): Candidate[]
     });
   }
   return [...merged.values()]
-    .sort((a, b) => (validFirst ? Number(b.c.valid) - Number(a.c.valid) : 0) || b.score - a.score || a.first - b.first)
+    .sort(
+      (a, b) =>
+        (validFirst ? Number(b.c.valid) - Number(a.c.valid) : 0) ||
+        (exactFirst ? Number(b.c.exact) - Number(a.c.exact) : 0) ||
+        b.score - a.score ||
+        a.first - b.first,
+    )
     .map((m) => m.c);
 }
 

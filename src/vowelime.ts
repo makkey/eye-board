@@ -4,7 +4,7 @@ import type { AiEffort, AiProvider } from './types';
 
 /**
  * 母音入力の変換（1文節ずつ）。母音ラボ（lab.html）で測った方式をそのまま使う：
- * 指示文 v2、っ・ー は母音で表す、前の文節までの確定した文を文脈として付ける、
+ * 指示文 v3（v2 に、1区切り＝ちょうど1文節の決まりを加えたもの）、っ・ー は母音で表す、前の文節までの確定した文を文脈として付ける、
  * 母音が入力と合わない候補は捨てる。
  */
 
@@ -45,7 +45,7 @@ export async function convertPhrase(
   runs = 1,
   exclude: string[] = [],
 ): Promise<string[]> {
-  const prompt = PROMPTS.v2;
+  const prompt = PROMPTS.v3;
   const style = 'fold';
   vowels = vowels.trim().replace(/ +/g, ' ');
   let user = userPrompt(context.slice(-CONTEXT_CHARS), vowels);
@@ -61,14 +61,14 @@ export async function convertPhrase(
       continue;
     }
     try {
-      lists.push(judge(s.value, vowels, '', '', true, style).filter((c) => c.valid));
+      lists.push(judge(s.value, vowels, '', '', true, style, true).filter((c) => c.valid));
     } catch (e) {
       firstError ??= e;
     }
   }
   if (!lists.length) throw firstError instanceof Error ? firstError : new Error(String(firstError));
   const texts: string[] = [];
-  for (const c of mergeRuns(lists, true)) {
+  for (const c of mergeRuns(lists, true, true)) {
     // 文節の中の区切りの空白は本文に入れない
     const text = c.text.replace(/[\s　]+/g, '');
     if (text && !texts.includes(text) && !exclude.includes(text)) texts.push(text);
