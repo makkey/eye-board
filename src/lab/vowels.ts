@@ -27,6 +27,11 @@ export function toHiragana(s: string): string {
   return s.replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
 }
 
+/** 句読点・記号（読みや表記に付いてきても、母音や正解の判定では無視する） */
+export function stripPunctuation(s: string): string {
+  return s.replace(/[、。，．,.!?！？「」『』（）()…・〜~]/g, '');
+}
+
 /** 空白を半角1つにそろえる */
 export function normalizeSpaces(s: string): string {
   return s.replace(/[\s　]+/g, ' ').trim();
@@ -37,7 +42,7 @@ export type VowelStyle = 'mark' | 'fold';
 /** 変換できない文字があれば null */
 export function toVowels(reading: string, style: VowelStyle = 'mark'): string | null {
   const out: string[] = [];
-  for (const c of toHiragana(normalizeSpaces(reading))) {
+  for (const c of toHiragana(normalizeSpaces(stripPunctuation(reading)))) {
     if (c === ' ') out.push(' ');
     else if (KEEP.has(c)) out.push(c);
     else if (SMALL[c]) {

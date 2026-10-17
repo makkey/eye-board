@@ -1,4 +1,4 @@
-import { normalizeSpaces, toHiragana, toVowels } from './vowels';
+import { normalizeSpaces, stripPunctuation, toHiragana, toVowels } from './vowels';
 import type { VowelStyle } from './vowels';
 
 /** 母音の規則（v1・v2 共通） */
@@ -126,7 +126,7 @@ export interface Candidate {
   correct: boolean;
 }
 
-const compact = (s: string) => toHiragana(normalizeSpaces(s)).replace(/ /g, '');
+const compact = (s: string) => toHiragana(normalizeSpaces(stripPunctuation(s))).replace(/ /g, '');
 
 /**
  * LLM の返答（JSON 文字列）を候補に変え、母音の一致と正解を判定する。

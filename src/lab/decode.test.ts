@@ -52,6 +52,15 @@ describe('judge', () => {
   });
 });
 
+describe('句読点', () => {
+  it('読みや表記に句読点があっても判定できる', () => {
+    const r = JSON.stringify({ candidates: [{ reading: 'すこし、さむいです。', text: '少し、寒いです。' }] });
+    const [c] = judge(r, 'うおい あういえう', 'すこし さむいです', '少し 寒いです');
+    expect(c.valid).toBe(true);
+    expect(c.correct).toBe(true);
+  });
+});
+
 describe('途中で切れた返答', () => {
   it('書き終わっている候補だけ拾う', () => {
     const raw = '{"candidates": [{"reading": "こんにちは", "vowels": "おんいいあ", "text": "こんにちは"}, {"reading": "こんにち';
