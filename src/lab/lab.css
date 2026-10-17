@@ -94,9 +94,15 @@
 .lab th {
   white-space: nowrap;
 }
+.legend {
+  padding: 0 6px;
+  border-radius: 4px;
+}
+.legend.hit,
 #detail tr.hit td {
   background: var(--accent-soft);
 }
+.legend.near,
 #detail tr.near td {
   background: var(--hover);
 }
