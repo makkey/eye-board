@@ -265,7 +265,28 @@ button[aria-pressed='true'] {
   background: transparent;
   border-color: transparent;
 }
-.stage-char .cell:not(.empty) .main {
+.cell.center {
+  background: transparent;
+  border-style: dotted;
+  color: var(--muted);
+}
+.cell.center .main {
+  font-size: 1.1rem;
+}
+.cell.back {
+  grid-column: 1 / -1;
+  min-height: 56px;
+  padding: 6px;
+  border-style: dashed;
+}
+.cell.back .main {
+  font-size: 1.2rem;
+}
+.cell .sub {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.stage-char .cell:not(.empty, .back, .center) .main {
   font-size: clamp(2.2rem, 10vw, 3.4rem);
 }
 .hover {

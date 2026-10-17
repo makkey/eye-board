@@ -4,7 +4,7 @@ export const DEFAULT_SETTINGS: Settings = {
   selectMs: 400,
   longMs: 2000,
   closeMinMs: 600,
-  cancelCloseMs: 1500,
+  restCloseMs: 1500,
   idleMs: 5000,
   debounceMs: 100,
   smoothing: 0.5,

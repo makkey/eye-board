@@ -55,7 +55,7 @@ function replaceLast(text: string, fn: (ch: string) => string): string {
 
 /**
  * アイテムをテキストに適用する。
- * 'speak' は副作用なので呼び出し側で扱い、テキストは変えない。
+ * 'speak' と 'undo' は履歴や音声が要るので呼び出し側で扱い、ここではテキストを変えない。
  */
 export function applyItem(text: string, item: Item): string {
   if (item.kind === 'char') return text + item.ch;
@@ -76,6 +76,7 @@ export function applyItem(text: string, item: Item): string {
       return text + '\n';
     case 'clear':
       return '';
+    case 'undo':
     case 'speak':
       return text;
   }

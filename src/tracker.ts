@@ -12,15 +12,13 @@ export interface TrackerFrame {
   faceFound: boolean;
   /** 平滑化済みの特徴量（classifier.ts 参照） */
   feature: Feature;
-  /** 0〜1。両目のまばたき値の平均 */
-  blink: number;
   landmarks?: NormalizedLandmark[];
 }
 
-// 目頭・目尻と虹彩中心のランドマーク番号
-const EYES: [number, number][] = [
-  [33, 133],
-  [362, 263],
+// 目ごとのランドマーク番号：[目尻/目頭, 目頭/目尻, 上まぶた, 下まぶた]
+const EYES: [number, number, number, number][] = [
+  [33, 133, 159, 145],
+  [362, 263, 386, 374],
 ];
 const IRIS_CENTERS = [468, 473];
 
@@ -96,12 +94,10 @@ export class Tracker {
       if (lm && bs) {
         const raw = extractFeature(lm, bs, v.videoWidth / v.videoHeight);
         const a = this.smoothing;
-        this.smoothed = this.smoothed
-          ? raw.feature.map((x, i) => a * x + (1 - a) * this.smoothed![i])
-          : raw.feature;
-        this.onFrame({ t, faceFound: true, feature: this.smoothed, blink: raw.blink, landmarks: lm });
+        this.smoothed = this.smoothed ? raw.map((x, i) => a * x + (1 - a) * this.smoothed![i]) : raw;
+        this.onFrame({ t, faceFound: true, feature: this.smoothed, landmarks: lm });
       } else {
-        this.onFrame({ t, faceFound: false, feature: this.smoothed ?? [0, 0, 0, 0], blink: 0 });
+        this.onFrame({ t, faceFound: false, feature: this.smoothed ?? [0, 0, 0, 0, 0, 0] });
       }
     }
     requestAnimationFrame(this.loop);
@@ -112,7 +108,7 @@ export function extractFeature(
   lm: NormalizedLandmark[],
   categories: Category[],
   aspect: number,
-): { feature: Feature; blink: number } {
+): Feature {
   const b: Record<string, number> = {};
   for (const c of categories) b[c.categoryName] = c.score;
 
@@ -124,7 +120,8 @@ export function extractFeature(
   // 虹彩の位置を目頭・目尻の線分を基準に正規化（頭の平行移動・拡大縮小に強い）
   let ix = 0;
   let iy = 0;
-  for (const [a, c] of EYES) {
+  let open = 0;
+  for (const [a, c, up, low] of EYES) {
     const p1 = { x: lm[a].x * aspect, y: lm[a].y };
     const p2 = { x: lm[c].x * aspect, y: lm[c].y };
     if (p2.x < p1.x) [p1.x, p2.x, p1.y, p2.y] = [p2.x, p1.x, p2.y, p1.y];
@@ -138,6 +135,8 @@ export function extractFeature(
     const d = { x: iris.x - mid.x, y: iris.y - mid.y };
     ix += (d.x * u.x + d.y * u.y) / w;
     iy += (-d.x * u.y + d.y * u.x) / w;
+    // 目の開き：下を見るとまぶたが下がるが、閉じた時ほどは狭まらない
+    open += Math.hypot((lm[up].x - lm[low].x) * aspect, lm[up].y - lm[low].y) / w;
   }
-  return { feature: [bsX, bsY, ix / 2, iy / 2], blink };
+  return [bsX, bsY, ix / 2, iy / 2, blink, open / 2];
 }

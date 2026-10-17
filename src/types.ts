@@ -2,10 +2,15 @@
 export type Dir = 'C' | 'U' | 'UR' | 'R' | 'DR' | 'D' | 'DL' | 'L' | 'UL';
 
 export const ALL_DIRS: Dir[] = ['C', 'U', 'UR', 'R', 'DR', 'D', 'DL', 'L', 'UL'];
-export const CARDINAL_DIRS: Dir[] = ['C', 'U', 'R', 'D', 'L'];
 
-/** フリック展開時の位置（中央＋上下左右） */
-export type Slot = 'C' | 'L' | 'U' | 'R' | 'D';
+/** 分類器が区別するクラス：9方向＋目を閉じている */
+export type GazeClass = Dir | 'closed';
+export const ALL_CLASSES: GazeClass[] = [...ALL_DIRS, 'closed'];
+
+/** 2段目（フラワー配置）：左から時計回りに あ・い・う・え・お */
+export const FLOWER_DIRS: Dir[] = ['L', 'UL', 'U', 'UR', 'R'];
+/** 2段目でこの方向を見ると、何も選ばずに1段目へ戻る */
+export const BACK_DIRS: Dir[] = ['DL', 'D', 'DR'];
 
 export const DIR_ARROW: Record<Dir, string> = {
   C: '●',
@@ -40,6 +45,7 @@ export type Action =
   | 'space'
   | 'newline'
   | 'clear'
+  | 'undo'
   | 'speak';
 
 export type Item =
@@ -52,7 +58,8 @@ export interface Row {
   label: string;
   /** 候補になった時の読み上げ */
   speak: string;
-  slots: Partial<Record<Slot, Item>>;
+  /** あ段・い段・う段・え段・お段の順（FLOWER_DIRS に対応）。空きは null */
+  items: (Item | null)[];
 }
 
 /** 1フレーム分の入力（視線分類後） */
@@ -68,7 +75,7 @@ export interface Settings {
   selectMs: number;
   longMs: number;
   closeMinMs: number;
-  cancelCloseMs: number;
+  restCloseMs: number;
   idleMs: number;
   debounceMs: number;
   smoothing: number;

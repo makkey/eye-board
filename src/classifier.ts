@@ -1,5 +1,5 @@
-import { ALL_DIRS } from './types';
-import type { Dir } from './types';
+import { ALL_CLASSES } from './types';
+import type { GazeClass } from './types';
 
 /**
  * 特徴量ベクトル:
@@ -7,90 +7,66 @@ import type { Dir } from './types';
  *   [1] blendshape 由来の上下（+ = 上）
  *   [2] 虹彩位置の左右（目頭・目尻基準、画像座標）
  *   [3] 虹彩位置の上下（同上）
- * 符号や縮尺は気にしない：キャリブレーションで方向ごとの代表値を覚える。
+ *   [4] blendshape のまばたき値（0〜1）
+ *   [5] 目の開き（上下まぶたの距離 ÷ 目の幅）
+ * 符号や縮尺は気にしない：キャリブレーションでクラスごとの代表値を覚える。
  */
 export type Feature = number[];
 
+export const F_BLINK = 4;
+
 export interface Calibration {
-  version: 1;
+  version: 2;
   createdAt: number;
-  /** 方向ごとの代表値（中央値） */
-  means: Record<Dir, Feature>;
-  /** 次元ごとの方向内ばらつき（分散） */
+  /** クラスごとの代表値（中央値） */
+  means: Record<GazeClass, Feature>;
+  /** 次元ごとのクラス内ばらつき（分散） */
   variance: Feature;
-  /** これを超えたら「目を閉じている」 */
-  blinkThreshold: number;
-  /** 目を閉じた時と開いた時の分離が悪い */
-  blinkWarning: boolean;
+  /** キャリブレーション時のサンプルを分類し直した時の正解率（0〜1） */
+  quality: Record<GazeClass, number>;
 }
 
 export interface ClassifyResult {
-  dir: Dir;
-  /** 方向ごとの距離（分散で正規化した二乗距離） */
-  distances: Partial<Record<Dir, number>>;
+  cls: GazeClass;
+  /** クラスごとの距離（分散で正規化した二乗距離） */
+  distances: Partial<Record<GazeClass, number>>;
 }
 
 export interface ClassifyOptions {
-  allowed: Dir[];
-  prev: Dir | null;
-  /** 0〜1。新しい方向に切り替えるには prev の距離 × この値 を下回る必要がある */
+  prev: GazeClass | null;
+  /** 0〜1。新しいクラスに切り替えるには prev の距離 × この値 を下回る必要がある */
   hysteresis: number;
   /** 中央の距離に掛ける係数。小さいほど中央が広くなる */
   centerBias: number;
 }
 
 export function classify(f: Feature, cal: Calibration, opt: ClassifyOptions): ClassifyResult {
-  const distances: Partial<Record<Dir, number>> = {};
-  let best: Dir = opt.allowed[0];
-  for (const dir of opt.allowed) {
-    const mu = cal.means[dir];
+  const distances: Partial<Record<GazeClass, number>> = {};
+  let best: GazeClass = 'C';
+  for (const cls of ALL_CLASSES) {
+    const mu = cal.means[cls];
     let d = 0;
     for (let i = 0; i < mu.length; i++) d += (f[i] - mu[i]) ** 2 / cal.variance[i];
-    if (dir === 'C') d *= opt.centerBias;
-    distances[dir] = d;
-    if (d < distances[best]!) best = dir;
+    if (cls === 'C') d *= opt.centerBias;
+    distances[cls] = d;
+    if (d < distances[best]!) best = cls;
   }
   if (opt.prev && opt.prev !== best && distances[opt.prev] !== undefined) {
     if (distances[best]! > distances[opt.prev]! * opt.hysteresis) best = opt.prev;
   }
-  return { dir: best, distances };
+  return { cls: best, distances };
 }
 
 /** キャリブレーション前の大まかな分類（blendshape の値だけを使う） */
-export function classifyDefault(f: Feature, allowed: Dir[], threshold = 0.25): ClassifyResult {
+export function classifyDefault(f: Feature, threshold = 0.25): ClassifyResult {
+  if (f[F_BLINK] > 0.5) return { cls: 'closed', distances: {} };
   const x = f[0];
   const y = f[1];
-  const mag = Math.hypot(x, y);
-  if (mag < threshold || !allowed.some((d) => d !== 'C')) return { dir: 'C', distances: {} };
-  const angle = Math.atan2(y, x); // 0 = 右, π/2 = 上
-  let best: Dir = 'C';
-  let bestDiff = Infinity;
-  for (const dir of allowed) {
-    if (dir === 'C') continue;
-    const diff = Math.abs(normalizeAngle(angle - DIR_ANGLE[dir]));
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      best = dir;
-    }
-  }
-  return { dir: best, distances: {} };
-}
-
-const DIR_ANGLE: Record<Exclude<Dir, 'C'>, number> = {
-  R: 0,
-  UR: Math.PI / 4,
-  U: Math.PI / 2,
-  UL: (3 * Math.PI) / 4,
-  L: Math.PI,
-  DL: (-3 * Math.PI) / 4,
-  D: -Math.PI / 2,
-  DR: -Math.PI / 4,
-};
-
-function normalizeAngle(a: number): number {
-  while (a > Math.PI) a -= 2 * Math.PI;
-  while (a < -Math.PI) a += 2 * Math.PI;
-  return a;
+  if (Math.hypot(x, y) < threshold) return { cls: 'C', distances: {} };
+  // -4〜4（-180°〜180°を45°刻み、0 = 右、2 = 上）
+  const sector = Math.round(Math.atan2(y, x) / (Math.PI / 4));
+  const SECTORS: GazeClass[] = ['L', 'DL', 'D', 'DR', 'R', 'UR', 'U', 'UL', 'L'];
+  return { cls: SECTORS[sector + 4], distances: {} };
 }
 
 function median(xs: number[]): number {
@@ -99,73 +75,66 @@ function median(xs: number[]): number {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-function quantile(xs: number[], q: number): number {
-  const s = [...xs].sort((a, b) => a - b);
-  return s[Math.min(s.length - 1, Math.max(0, Math.floor(q * (s.length - 1))))];
-}
-
-export interface CalibrationSample {
-  feature: Feature;
-  blink: number;
-}
-
 /**
- * 方向ごとのサンプルと「目を閉じた」サンプルからキャリブレーションを作る。
+ * クラスごとのサンプルからキャリブレーションを作る。
  * 外れ値（自然なまばたき等）に強いよう中央値と MAD を使う。
+ * 「目を閉じる」も1つのクラスとして扱うので、下を見た時のまぶたの下がり方と
+ * 閉じた時の違いを、まばたき値だけでなく全ての次元で見分ける。
  */
-export function buildCalibration(
-  samples: Record<Dir, CalibrationSample[]>,
-  closed: CalibrationSample[],
-): Calibration {
-  for (const dir of ALL_DIRS) {
-    if (!samples[dir] || samples[dir].length < 3) throw new Error(`サンプル不足: ${dir}`);
+export function buildCalibration(samples: Record<GazeClass, Feature[]>): Calibration {
+  for (const cls of ALL_CLASSES) {
+    if (!samples[cls] || samples[cls].length < 3) throw new Error(`サンプル不足: ${cls}`);
   }
-  if (closed.length < 3) throw new Error('サンプル不足: 目を閉じる');
 
-  const dims = samples.C[0].feature.length;
-  const means = {} as Record<Dir, Feature>;
+  const dims = samples.C[0].length;
+  const means = {} as Record<GazeClass, Feature>;
   const madSq: number[][] = Array.from({ length: dims }, () => []);
 
-  for (const dir of ALL_DIRS) {
+  for (const cls of ALL_CLASSES) {
     const mu: Feature = [];
     for (let i = 0; i < dims; i++) {
-      const xs = samples[dir].map((s) => s.feature[i]);
+      const xs = samples[cls].map((s) => s[i]);
       const m = median(xs);
       mu.push(m);
       const mad = median(xs.map((x) => Math.abs(x - m))) * 1.4826;
       madSq[i].push(mad * mad);
     }
-    means[dir] = mu;
+    means[cls] = mu;
   }
 
   const variance: Feature = [];
   for (let i = 0; i < dims; i++) {
-    const pooled = madSq[i].reduce((a, b) => a + b, 0) / madSq[i].length;
-    const ms = ALL_DIRS.map((d) => means[d][i]);
+    // 目を閉じている時の虹彩位置のように、1クラスだけ極端にばらつく次元があるので中央値でまとめる
+    const pooled = median(madSq[i]);
+    const ms = ALL_CLASSES.map((c) => means[c][i]);
     const spread = Math.max(...ms) - Math.min(...ms);
     // 極端に小さい分散で一つの次元が支配しないよう下限を設ける
     variance.push(Math.max(pooled, (0.1 * spread) ** 2, 1e-8));
   }
 
-  // 開いている時のまばたき値の上限（下を見るとまぶたが下がるので方向ごとに見る）
-  const openHigh = Math.max(...ALL_DIRS.map((d) => quantile(samples[d].map((s) => s.blink), 0.85)));
-  const closedLevel = median(closed.map((s) => s.blink));
-  const blinkWarning = closedLevel - openHigh < 0.15;
-  const blinkThreshold = blinkWarning
-    ? Math.max(0.5, openHigh + 0.05)
-    : openHigh + 0.5 * (closedLevel - openHigh);
-
-  return { version: 1, createdAt: Date.now(), means, variance, blinkThreshold, blinkWarning };
+  const cal: Calibration = {
+    version: 2,
+    createdAt: Date.now(),
+    means,
+    variance,
+    quality: {} as Record<GazeClass, number>,
+  };
+  const opt = { prev: null, hysteresis: 1, centerBias: 1 };
+  for (const cls of ALL_CLASSES) {
+    const ok = samples[cls].filter((f) => classify(f, cal, opt).cls === cls).length;
+    cal.quality[cls] = ok / samples[cls].length;
+  }
+  return cal;
 }
 
-const KEY = 'eyeboard.calibration.v1';
+const KEY = 'eyeboard.calibration.v2';
 
 export function loadCalibration(): Calibration | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const cal = JSON.parse(raw) as Calibration;
-    return cal.version === 1 ? cal : null;
+    return cal.version === 2 ? cal : null;
   } catch {
     return null;
   }

@@ -1,15 +1,17 @@
-import type { Dir, Item, Row, Slot } from './types';
+import { FLOWER_DIRS } from './types';
+import type { Dir, Item, Row } from './types';
 
 const c = (ch: string, speak?: string): Item => ({ kind: 'char', ch, speak });
+const a = (action: Extract<Item, { kind: 'action' }>['action'], label: string, speak: string): Item => ({
+  kind: 'action',
+  action,
+  label,
+  speak,
+});
 
 function kanaRow(id: string, chars: string): Row {
-  const [C, L, U, R, D] = [...chars];
-  return {
-    id,
-    label: C,
-    speak: `${C}行`,
-    slots: { C: c(C), L: c(L), U: c(U), R: c(R), D: c(D) },
-  };
+  const items = [...chars].map((ch) => c(ch));
+  return { id, label: chars[0], speak: `${chars[0]}行`, items };
 }
 
 export const ROWS: Record<string, Row> = {
@@ -24,48 +26,44 @@ export const ROWS: Record<string, Row> = {
     id: 'ya',
     label: 'や',
     speak: 'や行',
-    slots: { C: c('や'), L: c('（', 'かっこ'), U: c('ゆ'), R: c('）', 'かっことじ'), D: c('よ') },
+    items: [c('や'), c('（', 'かっこ'), c('ゆ'), c('）', 'かっことじ'), c('よ')],
   },
   ra: kanaRow('ra', 'らりるれろ'),
   wa: {
     id: 'wa',
     label: 'わ',
     speak: 'わ行',
-    slots: { C: c('わ'), L: c('を'), U: c('ん'), R: c('ー', 'のばしぼう') },
+    items: [c('わ'), c('を'), c('ん'), c('ー', 'のばしぼう'), null],
   },
   mod: {
     id: 'mod',
     label: '゛゜小',
     speak: '濁点',
-    slots: {
-      C: { kind: 'action', action: 'cycle', label: '゛゜小', speak: '切り替え' },
-      L: { kind: 'action', action: 'small', label: '小', speak: '小文字' },
-      U: { kind: 'action', action: 'dakuten', label: '゛', speak: '濁点' },
-      R: { kind: 'action', action: 'handakuten', label: '゜', speak: '半濁点' },
-    },
+    items: [
+      a('cycle', '゛゜小', '切り替え'),
+      a('small', '小', '小文字'),
+      a('dakuten', '゛', '濁点'),
+      a('handakuten', '゜', '半濁点'),
+      null,
+    ],
   },
   punct: {
     id: 'punct',
     label: '、。?!',
     speak: '句読点',
-    slots: {
-      C: c('、', 'てん'),
-      L: c('。', 'まる'),
-      U: c('？', 'はてな'),
-      R: c('！', 'びっくり'),
-    },
+    items: [c('、', 'てん'), c('。', 'まる'), c('？', 'はてな'), c('！', 'びっくり'), null],
   },
   edit: {
     id: 'edit',
     label: '編集',
     speak: '編集',
-    slots: {
-      C: { kind: 'action', action: 'backspace', label: '⌫削除', speak: '削除' },
-      L: { kind: 'action', action: 'clear', label: '全消去', speak: '全消去' },
-      U: { kind: 'action', action: 'speak', label: '🔊読上', speak: '読み上げ' },
-      R: { kind: 'action', action: 'space', label: '空白', speak: '空白' },
-      D: { kind: 'action', action: 'newline', label: '改行', speak: '改行' },
-    },
+    items: [
+      a('backspace', '⌫削除', '削除'),
+      a('space', '空白', '空白'),
+      a('speak', '🔊読上', '読み上げ'),
+      a('undo', '↶戻す', '元に戻す'),
+      a('clear', '全消去', '全消去'),
+    ],
   },
 };
 
@@ -90,17 +88,9 @@ export const LONG_ROW_BY_DIR: Partial<Record<Dir, string>> = {
   DR: 'punct',
 };
 
-export function dirToSlot(dir: Dir): Slot | null {
-  switch (dir) {
-    case 'C':
-    case 'L':
-    case 'U':
-    case 'R':
-    case 'D':
-      return dir;
-    default:
-      return null;
-  }
+/** 2段目：方向 → その行の何番目の項目か（フラワー配置以外は -1） */
+export function flowerIndex(dir: Dir): number {
+  return FLOWER_DIRS.indexOf(dir);
 }
 
 export function itemLabel(item: Item): string {

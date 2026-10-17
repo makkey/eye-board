@@ -1,17 +1,17 @@
 import './style.css';
 import { CalibrationRun, stepInstruction } from './calibration';
 import type { CalProgress } from './calibration';
-import { classify, classifyDefault, loadCalibration, saveCalibration } from './classifier';
+import { F_BLINK, classify, classifyDefault, loadCalibration, saveCalibration } from './classifier';
 import type { Calibration, ClassifyResult } from './classifier';
 import { InputEngine } from './engine';
 import { Feedback } from './feedback';
 import { applyItem } from './kana';
-import { LONG_ROW_BY_DIR, ROWS, ROW_BY_DIR, itemLabel, itemSpeech } from './layout';
+import { LONG_ROW_BY_DIR, ROWS, ROW_BY_DIR, flowerIndex, itemLabel, itemSpeech } from './layout';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './settings';
 import { Tracker } from './tracker';
 import type { TrackerFrame } from './tracker';
-import { ALL_DIRS, DIR_ARROW, DIR_NAME_JA } from './types';
-import type { Dir, Item, Row, Settings, Slot } from './types';
+import { ALL_CLASSES, ALL_DIRS, BACK_DIRS, DIR_ARROW, DIR_NAME_JA } from './types';
+import type { Dir, GazeClass, Item, Row, Settings } from './types';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -22,6 +22,8 @@ let mode: 'none' | 'camera' | 'sim' = 'none';
 let text = '';
 const undoStack: string[] = [];
 let lastRaw: ClassifyResult | null = null;
+/** 目を閉じる直前に見ていた方向（閉じている間はこれを渡す） */
+let lastOpenDir: Dir = 'C';
 let lastFrame: TrackerFrame | null = null;
 let closedNow = false;
 let calRun: CalibrationRun | null = null;
@@ -50,6 +52,10 @@ const engine = new InputEngine(settings, {
     feedback.play('tick');
     void feedback.say(itemSpeech(item));
   },
+  backCandidate() {
+    feedback.play('tick');
+    void feedback.say('もどる');
+  },
   commit(item) {
     feedback.play('commit');
     if (item !== spokenItem) void feedback.say(itemSpeech(item));
@@ -57,10 +63,11 @@ const engine = new InputEngine(settings, {
     applyToText(item);
     renderKeyboard();
   },
-  cancel() {
+  cancel(reason) {
     spokenItem = spokenRow = null;
     feedback.play('cancel');
-    void feedback.say('キャンセル');
+    // 下を見て戻る時は候補の時点で「もどる」と読み上げ済み
+    if (reason !== 'back') void feedback.say(reason === 'idle' ? 'キャンセル' : 'もどる');
     renderKeyboard();
   },
   closeTick(level) {
@@ -85,16 +92,22 @@ function applyToText(item: Item) {
     void feedback.say(text || '何も入力されていません', true);
     return;
   }
+  if (item.kind === 'action' && item.action === 'undo') {
+    undo();
+    return;
+  }
   setText(applyItem(text, item));
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  text = undoStack.pop()!;
+  textEl.value = text;
 }
 
 $('btn-speak').onclick = () => void feedback.say(text || '何も入力されていません', true);
 $('btn-copy').onclick = () => void navigator.clipboard?.writeText(text);
-$('btn-undo').onclick = () => {
-  if (!undoStack.length) return;
-  text = undoStack.pop()!;
-  textEl.value = text;
-};
+$('btn-undo').onclick = undo;
 $('btn-clear').onclick = () => setText('');
 
 // ---- キーボード表示 ----
@@ -108,8 +121,8 @@ const LONG_KEYS: [Dir, string][] = [
 ];
 
 function rowSub(row: Row): string {
-  return (['L', 'U', 'R', 'D'] as Slot[])
-    .map((s) => row.slots[s])
+  return row.items
+    .slice(1)
     .filter((x): x is Item => !!x)
     .map(itemLabel)
     .join('');
@@ -137,21 +150,27 @@ function renderKeyboard() {
     return;
   }
 
+  // フラワー配置：左から時計回りに あ・い・う・え・お、下は「戻る」
   const row = engine.row!;
-  const layout: (Slot | null)[] = [null, 'U', null, 'L', 'C', 'R', null, 'D', null];
-  for (const slot of layout) {
+  for (const dir of ['UL', 'U', 'UR', 'L', 'C', 'R'] as Dir[]) {
     const cell = document.createElement('div');
-    if (!slot) {
-      cell.className = 'cell empty';
+    if (dir === 'C') {
+      cell.className = 'cell center';
+      // 左の「あ段」と紛れないよう、中央は行の名前を小さく出す
+      cell.innerHTML = `<span class="main">${row.speak.endsWith('行') ? row.speak : row.label}</span>`;
     } else {
-      const item = row.slots[slot];
+      const item = row.items[flowerIndex(dir)];
       cell.className = item ? 'cell' : 'cell empty';
-      cell.id = `cell-${slot}`;
-      cell.innerHTML = `<span class="main">${item ? itemLabel(item) : ''}</span>
-        <span class="hint">${slot === 'C' ? '目を閉じる' : DIR_ARROW[slot]}</span>`;
+      cell.id = `cell-${dir}`;
+      cell.innerHTML = `<span class="hint">${DIR_ARROW[dir]}</span><span class="main">${item ? itemLabel(item) : ''}</span>`;
     }
     keyboardEl.append(cell);
   }
+  const back = document.createElement('div');
+  back.className = 'cell back';
+  back.id = 'cell-back';
+  back.innerHTML = `<span class="main">↙ ↓ ↘ もどる</span><span class="sub">目を閉じても戻る</span>`;
+  keyboardEl.append(back);
 }
 
 function keyEl(row: Row, hint: string, cls: string) {
@@ -186,13 +205,15 @@ function updateView(t: number) {
     if (cand?.kind === 'row') $(`key-${cand.row.id}`)?.classList.add('candidate');
     else if (engine.dir !== 'C') $(`key-${ROWS[ROW_BY_DIR[engine.dir]].id}`)?.classList.add('hover');
   } else {
-    if (cand?.kind === 'slot') $(`cell-${cand.slot}`)?.classList.add('candidate');
-    else if (engine.dir !== 'C') $(`cell-${engine.dir}`)?.classList.add('hover');
+    const cellId = (dir: Dir) => (BACK_DIRS.includes(dir) ? 'cell-back' : `cell-${dir}`);
+    if (cand?.kind === 'item') $(cellId(cand.dir))?.classList.add('candidate');
+    else if (cand?.kind === 'back') $('cell-back').classList.add('candidate');
+    else if (engine.dir !== 'C') $(cellId(engine.dir))?.classList.add('hover');
   }
 
   for (const dir of ALL_DIRS) {
     gazeCells[dir].classList.toggle('on', engine.dir === dir);
-    gazeCells[dir].classList.toggle('raw', lastRaw?.dir === dir && engine.dir !== dir);
+    gazeCells[dir].classList.toggle('raw', lastRaw?.cls === dir && engine.dir !== dir);
   }
   gazeEl.classList.toggle('closed', closedNow);
   gazeEl.classList.toggle('noface', mode === 'camera' && !lastFrame?.faceFound);
@@ -202,8 +223,12 @@ function updateView(t: number) {
   let marker: number | null = null;
   if (engine.closedStart !== null) {
     const dur = t - engine.closedStart;
-    fill = dur / settings.cancelCloseMs;
-    marker = settings.closeMinMs / settings.cancelCloseMs;
+    if (engine.stage === 'row') {
+      fill = dur / settings.restCloseMs;
+      marker = settings.closeMinMs / settings.restCloseMs;
+    } else {
+      fill = dur / settings.closeMinMs;
+    }
   } else if (engine.holdStart !== null) {
     const held = t - engine.holdStart;
     if (engine.stage === 'row' && LONG_ROW_BY_DIR[engine.dir]) {
@@ -225,7 +250,9 @@ function updateView(t: number) {
   } else if (engine.closedStart !== null) {
     const dur = t - engine.closedStart;
     main = '目を閉じています';
-    sub = dur < settings.closeMinMs ? '…' : dur < settings.cancelCloseMs ? '開けると選択' : '開けるとキャンセル';
+    if (dur < settings.closeMinMs) sub = '…';
+    else if (engine.stage === 'char') sub = '開けると戻る';
+    else sub = dur < settings.restCloseMs ? '開けると な行' : '休憩中（開けても何もしません）';
   } else if (engine.stage === 'row') {
     if (cand?.kind === 'row') {
       main = `${cand.row.label}`;
@@ -237,12 +264,15 @@ function updateView(t: number) {
     }
   } else {
     const row = engine.row!;
-    if (cand?.kind === 'slot') {
+    if (cand?.kind === 'item') {
       main = `「${itemLabel(cand.item)}」`;
       sub = '画面に視線を戻すと確定';
+    } else if (cand?.kind === 'back') {
+      main = 'もどる';
+      sub = '画面に視線を戻すと1段目へ';
     } else {
       main = `${row.label} — 文字を選ぶ`;
-      sub = `方向を見る → 戻る　／　目を閉じる → ${row.slots.C ? itemLabel(row.slots.C) : ''}`;
+      sub = '← ↖ ↑ ↗ → を見て戻る　／　下か目を閉じる → もどる';
     }
   }
   statusMain.textContent = main;
@@ -261,18 +291,16 @@ function onTrackerFrame(f: TrackerFrame) {
   calRun?.push(f);
   if (mode !== 'camera' || calRun) return;
 
-  const allowed = engine.allowedDirs();
-  const prev = lastRaw && allowed.includes(lastRaw.dir) ? lastRaw.dir : null;
   lastRaw = calibration
     ? classify(f.feature, calibration, {
-        allowed,
-        prev,
+        prev: lastRaw?.cls ?? null,
         hysteresis: settings.hysteresis,
         centerBias: settings.centerBias,
       })
-    : classifyDefault(f.feature, allowed);
-  closedNow = f.faceFound && f.blink > (calibration?.blinkThreshold ?? 0.5);
-  engine.update({ t: f.t, faceFound: f.faceFound, dir: lastRaw.dir, closed: closedNow });
+    : classifyDefault(f.feature);
+  closedNow = f.faceFound && lastRaw.cls === 'closed';
+  if (lastRaw.cls !== 'closed') lastOpenDir = lastRaw.cls;
+  engine.update({ t: f.t, faceFound: f.faceFound, dir: lastOpenDir, closed: closedNow });
 }
 tracker.onFrame = onTrackerFrame;
 
@@ -280,8 +308,8 @@ function frameLoop() {
   const t = performance.now();
   if (mode === 'sim' && !calRun) {
     const dir = simDir();
-    lastRaw = { dir, distances: {} };
     closedNow = simKeys.has(' ');
+    lastRaw = { cls: closedNow ? 'closed' : dir, distances: {} };
     engine.update({ t, faceFound: true, dir, closed: closedNow });
   }
   updateView(t);
@@ -372,8 +400,12 @@ async function runCalibration() {
   try {
     calibration = await calRun.run();
     saveCalibration(calibration);
-    if (calibration.blinkWarning) {
-      alert('目を閉じた状態と開いた状態の区別がつきにくい結果でした。明るさを調整して、もう一度試すと改善するかもしれません。');
+    const weak = ALL_CLASSES.filter((c) => calibration!.quality[c] < 0.8);
+    if (weak.length) {
+      alert(
+        `次の区別がつきにくい結果でした：${weak.map(className).join('、')}\n` +
+          '明るさやカメラの位置を変えて、もう一度試すと改善するかもしれません。',
+      );
     }
   } catch (e) {
     if ((e as Error).message !== '中断しました') alert((e as Error).message);
@@ -400,7 +432,7 @@ const FIELDS: { key: keyof Settings; label: string; step?: number; min?: number;
   { key: 'selectMs', label: '候補になるまで（ms）', step: 50, min: 100 },
   { key: 'longMs', label: '長く見る（わ・゛など）（ms）', step: 100, min: 500 },
   { key: 'closeMinMs', label: '目を閉じて選択（ms）', step: 50, min: 200 },
-  { key: 'cancelCloseMs', label: '目を閉じてキャンセル（ms）', step: 100, min: 500 },
+  { key: 'restCloseMs', label: '目を閉じて休む（1段目）（ms）', step: 100, min: 500 },
   { key: 'idleMs', label: '無操作キャンセル（ms）', step: 500, min: 1000 },
   { key: 'debounceMs', label: '揺れの無視（ms）', step: 10, min: 0 },
   { key: 'smoothing', label: '平滑化（1 = なし）', step: 0.05, min: 0.05, max: 1 },
@@ -518,12 +550,21 @@ function drawDebug() {
     `face       ${f?.faceFound ?? '-'}`,
     `bs  x,y    ${f ? fmt(f.feature[0]) + fmt(f.feature[1]) : '-'}`,
     `iris x,y   ${f ? fmt(f.feature[2]) + fmt(f.feature[3]) : '-'}`,
-    `blink      ${f ? fmt(f.blink) : '-'}  閾値 ${fmt(calibration?.blinkThreshold ?? 0.5)}`,
-    `raw dir    ${lastRaw ? DIR_NAME_JA[lastRaw.dir] : '-'}　安定 ${DIR_NAME_JA[engine.dir]}`,
+    `blink,開き ${f ? fmt(f.feature[F_BLINK]) + fmt(f.feature[5]) : '-'}`,
+    `判定       ${lastRaw ? className(lastRaw.cls) : '-'}　安定 ${DIR_NAME_JA[engine.dir]}`,
     `stage      ${engine.stage}${engine.row ? ' ' + engine.row.label : ''}`,
     '',
-    ...ALL_DIRS.filter((d) => dist[d] !== undefined).map((d) => `${DIR_ARROW[d]} ${dist[d]!.toFixed(1)}`),
+    'クラス  距離   キャリブ精度',
+    ...ALL_CLASSES.map(
+      (c) =>
+        `${className(c).padEnd(3, '　')} ${dist[c] !== undefined ? dist[c]!.toFixed(1).padStart(6) : '     -'}` +
+        `   ${calibration ? Math.round(calibration.quality[c] * 100) + '%' : '-'}`,
+    ),
   ].join('\n');
+}
+
+function className(c: GazeClass): string {
+  return c === 'closed' ? '閉じる' : DIR_NAME_JA[c];
 }
 
 // ---- 起動 ----

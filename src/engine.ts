@@ -1,22 +1,26 @@
-import { LONG_ROW_BY_DIR, ROWS, ROW_BY_DIR, dirToSlot } from './layout';
-import { ALL_DIRS, CARDINAL_DIRS } from './types';
-import type { Dir, GazeFrame, Item, Row, Settings, Slot } from './types';
+import { LONG_ROW_BY_DIR, ROWS, ROW_BY_DIR, flowerIndex } from './layout';
+import { BACK_DIRS } from './types';
+import type { Dir, GazeFrame, Item, Row, Settings } from './types';
 
 export type Candidate =
   | { kind: 'row'; row: Row; long: boolean }
-  | { kind: 'slot'; slot: Slot; item: Item };
+  | { kind: 'item'; dir: Dir; item: Item }
+  | { kind: 'back' };
 
 export interface EngineEvents {
   /** 1段目で行が候補になった（まだ確定していない） */
   rowCandidate?(row: Row, long: boolean): void;
-  /** 行が確定し、2段目（フリック展開）に入った */
+  /** 行が確定し、2段目（フラワー展開）に入った */
   rowCommit?(row: Row): void;
   /** 2段目で文字が候補になった */
   itemCandidate?(item: Item): void;
+  /** 2段目で「戻る」が候補になった */
+  backCandidate?(): void;
   /** 文字・操作が確定した */
   commit?(item: Item): void;
-  cancel?(reason: 'close' | 'idle'): void;
-  /** 目を閉じ続けて閾値を越えた（1: 中央選択, 2: キャンセル） */
+  /** 何も選ばずに1段目へ戻った */
+  cancel?(reason: 'back' | 'close' | 'idle'): void;
+  /** 目を閉じ続けて閾値を越えた（1: 選択／戻る, 2: 休む＝何もしない） */
   closeTick?(level: 1 | 2): void;
   /** 安定した視線方向が変わった */
   dirChange?(dir: Dir): void;
@@ -25,11 +29,15 @@ export interface EngineEvents {
 /**
  * 視線方向の時系列を「行選択 → 文字選択」に変換する状態機械。
  *
+ * 1段目（行）
  * - 方向を selectMs 見続けると候補、中央に戻ると確定
  * - 一部の方向は longMs 見続けると別の行（わ・゛゜小・句読点・編集）に切り替わる
- * - 中央の項目（な行／各行の あ段）は、目を closeMinMs 以上閉じて開くと確定
- * - 目を cancelCloseMs 以上閉じるとキャンセル（1段目では「何もしない」＝目を休める）
- * - 2段目で idleMs 何もしないとキャンセル
+ * - 目を closeMinMs 以上閉じて開くと「な行」。restCloseMs 以上なら何もしない（目を休める）
+ *
+ * 2段目（フラワー配置：左から時計回りに あ・い・う・え・お）
+ * - 方向を selectMs 見続けると候補、中央に戻ると確定
+ * - 下方向（↙↓↘）を見て戻る、または目を closeMinMs 以上閉じて開くと、何も選ばず1段目へ
+ * - idleMs 何もしなくても1段目へ
  */
 export class InputEngine {
   stage: 'row' | 'char' = 'row';
@@ -52,11 +60,6 @@ export class InputEngine {
     private settings: Settings,
     private events: EngineEvents = {},
   ) {}
-
-  /** 現在の段階で意味のある方向（分類器の候補を絞るのに使う） */
-  allowedDirs(): Dir[] {
-    return this.stage === 'row' ? ALL_DIRS : CARDINAL_DIRS;
-  }
 
   reset(t = 0) {
     this.stage = 'row';
@@ -108,7 +111,8 @@ export class InputEngine {
       this.closeLevel = 1;
       this.events.closeTick?.(1);
     }
-    if (this.closeLevel < 2 && dur >= this.settings.cancelCloseMs) {
+    // 2段目では長さに関係なく「戻る」なので、休む段階は1段目だけ
+    if (this.closeLevel < 2 && this.stage === 'row' && dur >= this.settings.restCloseMs) {
       this.closeLevel = 2;
       this.events.closeTick?.(2);
     }
@@ -122,15 +126,9 @@ export class InputEngine {
     // 開いた直後の視線は不安定なので、方向のデバウンスをやり直す
     this.pendingSince = t;
 
-    if (level === 1) {
-      if (this.stage === 'row') {
-        this.enterChar(ROWS[ROW_BY_DIR.C], t);
-      } else if (this.row?.slots.C) {
-        this.commitItem(this.row.slots.C);
-      }
-    } else if (level === 2) {
-      this.cancel('close');
-    }
+    if (level !== 1) return;
+    if (this.stage === 'row') this.enterChar(ROWS[ROW_BY_DIR.C], t);
+    else this.cancel('close');
   }
 
   private updateDir(raw: Dir, t: number) {
@@ -171,13 +169,19 @@ export class InputEngine {
       if (longId && held >= s.longMs && this.candidate?.kind === 'row' && !this.candidate.long) {
         this.setRowCandidate(ROWS[longId], true);
       }
-    } else if (this.row && !this.candidate && held >= s.selectMs) {
-      const slot = dirToSlot(this.dir);
-      const item = slot && slot !== 'C' ? this.row.slots[slot] : undefined;
-      if (slot && item) {
-        this.candidate = { kind: 'slot', slot, item };
-        this.events.itemCandidate?.(item);
-      }
+      return;
+    }
+
+    if (!this.row || this.candidate || held < s.selectMs) return;
+    if (BACK_DIRS.includes(this.dir)) {
+      this.candidate = { kind: 'back' };
+      this.events.backCandidate?.();
+      return;
+    }
+    const item = this.row.items[flowerIndex(this.dir)];
+    if (item) {
+      this.candidate = { kind: 'item', dir: this.dir, item };
+      this.events.itemCandidate?.(item);
     }
   }
 
@@ -196,7 +200,8 @@ export class InputEngine {
     this.candidate = null;
     if (!cand) return;
     if (cand.kind === 'row') this.enterChar(cand.row, t);
-    else this.commitItem(cand.item);
+    else if (cand.kind === 'item') this.commitItem(cand.item);
+    else this.cancel('back');
   }
 
   private enterChar(row: Row, t: number) {
@@ -214,7 +219,7 @@ export class InputEngine {
     this.events.commit?.(item);
   }
 
-  private cancel(reason: 'close' | 'idle') {
+  private cancel(reason: 'back' | 'close' | 'idle') {
     this.stage = 'row';
     this.row = null;
     this.candidate = null;

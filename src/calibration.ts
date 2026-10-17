@@ -1,13 +1,14 @@
 import { buildCalibration } from './classifier';
-import type { Calibration, CalibrationSample } from './classifier';
+import type { Calibration, Feature } from './classifier';
 import type { Feedback } from './feedback';
 import type { TrackerFrame } from './tracker';
-import { ALL_DIRS, DIR_NAME_JA } from './types';
-import type { Dir } from './types';
+import { ALL_CLASSES, DIR_NAME_JA } from './types';
+import type { GazeClass } from './types';
 
-export type CalStep = Dir | 'closed';
+export type CalStep = GazeClass;
 
-const STEPS: CalStep[] = ['C', 'U', 'UR', 'R', 'DR', 'D', 'DL', 'L', 'UL', 'C', 'closed'];
+// 「下を見る」と「目を閉じる」は紛れやすいので、最後にもう一度ずつ記録する
+const STEPS: CalStep[] = ['C', 'U', 'UR', 'R', 'DR', 'D', 'DL', 'L', 'UL', 'C', 'closed', 'D', 'closed'];
 
 const SETTLE_MS = 700;
 const RECORD_MS = 1500;
@@ -34,11 +35,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * 画面を見られない方向もあるので、案内は読み上げと効果音が主。
  */
 export class CalibrationRun {
-  private samples = Object.fromEntries(ALL_DIRS.map((d) => [d, []])) as unknown as Record<
-    Dir,
-    CalibrationSample[]
+  private samples = Object.fromEntries(ALL_CLASSES.map((c) => [c, []])) as unknown as Record<
+    GazeClass,
+    Feature[]
   >;
-  private closed: CalibrationSample[] = [];
   private recording: CalStep | null = null;
   private aborted = false;
   private missed = 0;
@@ -56,9 +56,7 @@ export class CalibrationRun {
       this.missed++;
       return;
     }
-    const s = { feature: [...f.feature], blink: f.blink };
-    if (this.recording === 'closed') this.closed.push(s);
-    else this.samples[this.recording].push(s);
+    this.samples[this.recording].push([...f.feature]);
   }
 
   abort() {
@@ -92,7 +90,7 @@ export class CalibrationRun {
     if (this.seen > 0 && this.missed / this.seen > 0.5) {
       throw new Error('顔を見失うことが多すぎました。カメラの位置や明るさを確認してください。');
     }
-    const cal = buildCalibration(this.samples, this.closed);
+    const cal = buildCalibration(this.samples);
     await this.feedback.say('キャリブレーションが完了しました', true);
     return cal;
   }
