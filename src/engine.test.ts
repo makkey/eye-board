@@ -62,7 +62,7 @@ describe('InputEngine', () => {
     expect(got).toEqual(['か', 'き', 'く', 'け', 'こ']);
   });
 
-  it('1段目は ↖あ ↑か ↗さ ←た →は、2秒で ↖ま ↑や ↗ら ←わ →編集', () => {
+  it('1段目は ↖あ ↑か ↗さ ←た →は、2秒で ↖ま ↑や ↗ら ←編集 →わ', () => {
     const first = (d: Dir, ms: number) =>
       run([
         ['C', 300],
@@ -72,7 +72,7 @@ describe('InputEngine', () => {
         ['C', 300],
       ]).log[0];
     expect((['UL', 'U', 'UR', 'L', 'R'] as Dir[]).map((d) => first(d, 600))).toEqual(['あ', 'か', 'さ', 'た', 'は']);
-    expect((['UL', 'U', 'UR', 'L', 'R'] as Dir[]).map((d) => first(d, 2300))).toEqual(['ま', 'や', 'ら', 'わ', '全消去']);
+    expect((['UL', 'U', 'UR', 'L', 'R'] as Dir[]).map((d) => first(d, 2300))).toEqual(['ま', 'や', 'ら', '⌫削除', 'わ']);
   });
 
   it('既定の設定では 0.6 秒見ると候補になる', () => {
@@ -93,12 +93,12 @@ describe('InputEngine', () => {
     expect(look(900)).toEqual(['か']);
   });
 
-  it('→ を2秒、続けて → で削除', () => {
+  it('← を2秒、続けて ← で削除', () => {
     const { log } = run([
       ['C', 300],
-      ['R', 2300],
+      ['L', 2300],
       ['C', 300],
-      ['R', 600],
+      ['L', 600],
       ['C', 300],
     ]);
     expect(log).toEqual(['⌫削除']);
@@ -301,12 +301,12 @@ describe('InputEngine（英語）', () => {
     expect(rows).toEqual(['en-symbols']);
   });
 
-  it('→ を2秒、続けて → で削除', () => {
+  it('← を2秒、続けて ← で削除', () => {
     const { log } = en([
       ['C', 300],
-      ['R', 2300],
+      ['L', 2300],
       ['C', 300],
-      ['R', 600],
+      ['L', 600],
       ['C', 300],
     ]);
     expect(log).toEqual(['⌫Del']);

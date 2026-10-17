@@ -55,13 +55,12 @@ const JA: Record<string, Row> = {
     id: 'edit',
     label: '編集',
     speak: '編集',
-    // 削除は →（「→ を2秒、続けて →」で削除できるように）
     items: [
-      a('clear', '全消去', '全消去'),
+      a('backspace', '⌫削除', '削除'),
       a('space', '空白', '空白'),
       a('speak', '🔊読上', '読み上げ'),
       a('undo', '↶戻す', '元に戻す'),
-      a('backspace', '⌫削除', '削除'),
+      a('clear', '全消去', '全消去'),
     ],
   },
 };
@@ -69,7 +68,8 @@ const JA: Record<string, Row> = {
 export const JA_KEYMAP: Keymap = {
   lang: 'ja',
   rowByDir: { UL: JA.a, U: JA.ka, UR: JA.sa, L: JA.ta, R: JA.ha },
-  longRowByDir: { UL: JA.ma, U: JA.ya, UR: JA.ra, L: JA.wa, R: JA.edit },
+  // 編集は ←（「← を2秒、続けて ←」で削除）
+  longRowByDir: { UL: JA.ma, U: JA.ya, UR: JA.ra, L: JA.edit, R: JA.wa },
   closeShort: { kind: 'row', row: JA.na },
   closeLong: JA.kigo,
 };
@@ -137,13 +137,12 @@ const EN: Record<string, Row> = {
     id: 'en-edit',
     label: 'Edit',
     speak: 'edit',
-    // Backspace は →（「→ を2秒、続けて →」で消せるように）
     items: [
-      a('clear', 'Clear', 'clear'),
+      a('backspace', '⌫Del', 'delete'),
       a('case', 'Aa', 'case'),
       a('speak', '🔊Speak', 'speak'),
       a('undo', '↶Undo', 'undo'),
-      a('backspace', '⌫Del', 'delete'),
+      a('clear', 'Clear', 'clear'),
     ],
   },
 };
@@ -151,7 +150,8 @@ const EN: Record<string, Row> = {
 export const EN_KEYMAP: Keymap = {
   lang: 'en',
   rowByDir: { UL: EN.ae, U: EN.fj, UR: EN.ko, L: EN.pt, R: EN.uy },
-  longRowByDir: { UL: EN.num1, U: EN.num2, UR: EN.punct, L: EN.brackets, R: EN.edit },
+  // Edit は ←（「← を2秒、続けて ←」で Backspace）
+  longRowByDir: { UL: EN.num1, U: EN.num2, UR: EN.punct, L: EN.edit, R: EN.brackets },
   closeShort: { kind: 'item', item: c(' ', 'space', '␣') },
   closeLong: EN.symbols,
 };
