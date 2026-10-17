@@ -2,7 +2,7 @@ import '../style.css';
 import './lab.css';
 import { DEFAULT_SENTENCES, parseSentences } from './dataset';
 import { PROMPTS, TOP_N, judge, segmentPrompt, sentencePrompt } from './decode';
-import type { Candidate, PromptId } from './decode';
+import type { Candidate, PromptId, PromptVersion } from './decode';
 import { PROVIDERS } from './providers';
 import type { Effort, ProviderId } from './providers';
 import { toVowels } from './vowels';
@@ -150,11 +150,23 @@ promptSelect.onchange = () => {
 showPrompt();
 
 /** 1回問い合わせて、かかった時間と返答を返す */
-async function ask(user: string, p = promptVersion()): Promise<{ raw: string; ms: number }> {
-  const key = requireKey();
-  const model = currentModel();
+/** 問い合わせ先（まとめて測る時は、実行中に画面を切り替えられても同じ設定で通す） */
+interface Target {
+  provider: ProviderId;
+  key: string;
+  model: string;
+  effort: Effort;
+  prompt: PromptVersion;
+}
+
+function currentTarget(): Target {
+  return { provider: providerId, key: requireKey(), model: currentModel(), effort: effort(), prompt: promptVersion() };
+}
+
+/** 1回問い合わせて、かかった時間と返答を返す */
+async function ask(user: string, t: Target): Promise<{ raw: string; ms: number }> {
   const start = performance.now();
-  const raw = await PROVIDERS[providerId].generate(key, model, p.system, p.schema, user, effort());
+  const raw = await PROVIDERS[t.provider].generate(t.key, t.model, t.prompt.system, t.prompt.schema, user, t.effort);
   return { raw, ms: performance.now() - start };
 }
 
@@ -173,10 +185,9 @@ $('btn-try').onclick = async () => {
     return;
   }
   const context = $<HTMLInputElement>('try-context').value.trim();
-  let model: string;
+  let target: Target;
   try {
-    requireKey();
-    model = currentModel();
+    target = currentTarget();
   } catch (e) {
     error.textContent = (e as Error).message;
     return;
@@ -185,17 +196,17 @@ $('btn-try').onclick = async () => {
   // 返ってくるまで数秒〜数十秒かかるので、経過時間を出しておく
   const btn = $<HTMLButtonElement>('btn-try');
   btn.disabled = true;
-  const label = `${PROVIDERS[providerId].label}: ${model}（指示文 ${promptVersion().id}）`;
+  const label = `${PROVIDERS[target.provider].label}: ${target.model}（指示文 ${target.prompt.id}）`;
   const started = performance.now();
   const tick = () => (status.textContent = `${label} に問い合わせ中…（${((performance.now() - started) / 1000).toFixed(0)}秒）送った母音：${vowels}`);
   tick();
   const timer = setInterval(tick, 500);
   try {
     const user = context ? segmentPrompt(context, vowels) : sentencePrompt(vowels);
-    const { raw, ms } = await ask(user);
+    const { raw, ms } = await ask(user, target);
     $('try-raw').textContent = raw;
     $('try-raw-box').hidden = false;
-    const all = judge(raw, vowels, '', '', promptVersion().validFirst);
+    const all = judge(raw, vowels, '', '', target.prompt.validFirst);
     const cands = all.slice(0, TOP_N);
     const dropped = all.length - cands.length;
     status.textContent = `${label}　${(ms / 1000).toFixed(1)}秒　送った母音：${vowels}` + (dropped > 0 ? `　（ほかに ${dropped} 候補を省略）` : '');
@@ -250,6 +261,8 @@ interface TaskResult extends Task {
   /** 受け取った候補の数と、そのうち母音が合う数 */
   received: number;
   receivedValid: number;
+  /** まだ問い合わせていない（中止した時に残る） */
+  pending?: boolean;
   ms: number;
   error?: string;
 }
@@ -290,48 +303,75 @@ function buildTasks(mode: string, limit: number): Task[] {
   return tasks;
 }
 
+/** 直近の実行の設定（エラーになった分をやり直す時に使う） */
+let lastTarget: Target | null = null;
+let lastMode = '';
+
 $('btn-run').onclick = async () => {
-  let model: string;
+  let target: Target;
   try {
-    requireKey();
-    model = currentModel();
+    target = currentTarget();
   } catch (e) {
     alert((e as Error).message);
     return;
   }
   const mode = (document.querySelector('input[name=mode]:checked') as HTMLInputElement).value;
   const limit = Math.max(1, Number($<HTMLInputElement>('limit').value) || 20);
-  const parallel = Math.min(8, Math.max(1, Number($<HTMLInputElement>('parallel').value) || 3));
   const tasks = buildTasks(mode, limit);
   if (!tasks.length) return;
-  // 実行中に切り替えられても、この実行は同じ版で通す
-  const prompt = promptVersion();
+  lastTarget = target;
+  lastMode = mode;
+  lastRun = tasks.map((t) => ({ ...t, candidates: [], received: 0, receivedValid: 0, ms: 0, pending: true }));
+  await runTasks(lastRun, target);
+  if (!lastRun.some((r) => !r.pending)) return;
+  results.push(summarize(target, mode, lastRun.filter((r) => !r.pending)));
+  store.set('results', JSON.stringify(results));
+  renderSummary();
+};
 
+$('btn-retry').onclick = async () => {
+  const failed = lastRun.filter((r) => r.error);
+  if (!lastTarget || !failed.length) return;
+  // キーは今の画面の値を使う（無料キーから有料キーに替えてやり直せるように）
+  let target = lastTarget;
+  if (providerId === lastTarget.provider && keyInput.value.trim()) target = { ...lastTarget, key: keyInput.value.trim() };
+  for (const r of failed) {
+    r.error = undefined;
+    r.pending = true;
+  }
+  await runTasks(failed, target);
+  // 結果の表の最後の行（直近の実行）を書き直す
+  results[Math.max(0, results.length - 1)] = summarize(target, lastMode, lastRun.filter((r) => !r.pending));
+  store.set('results', JSON.stringify(results));
+  renderSummary();
+};
+
+/** rs の各問いを並列に問い合わせ、結果を rs に書き込む */
+async function runTasks(rs: TaskResult[], target: Target) {
+  const parallel = Math.min(8, Math.max(1, Number($<HTMLInputElement>('parallel').value) || 3));
   stopRequested = false;
-  $<HTMLButtonElement>('btn-run').disabled = true;
+  for (const id of ['btn-run', 'btn-retry']) $<HTMLButtonElement>(id).disabled = true;
   $<HTMLButtonElement>('btn-stop').disabled = false;
-  lastRun = [];
   renderDetail();
 
   let next = 0;
   let done = 0;
-  const progress = () => ($('progress').textContent = `${done} / ${tasks.length}`);
+  const progress = () => ($('progress').textContent = `${done} / ${rs.length}`);
   progress();
   const worker = async () => {
-    while (!stopRequested && next < tasks.length) {
-      const task = tasks[next++];
-      const result: TaskResult = { ...task, candidates: [], received: 0, receivedValid: 0, ms: 0 };
+    while (!stopRequested && next < rs.length) {
+      const r = rs[next++];
       try {
-        const { raw, ms } = await ask(task.user, prompt);
-        result.ms = ms;
-        const all = judge(raw, task.vowels, task.goldReading, task.goldText, prompt.validFirst);
-        result.candidates = all.slice(0, TOP_N);
-        result.received = all.length;
-        result.receivedValid = all.filter((c) => c.valid).length;
+        const { raw, ms } = await ask(r.user, target);
+        r.ms = ms;
+        const all = judge(raw, r.vowels, r.goldReading, r.goldText, target.prompt.validFirst);
+        r.candidates = all.slice(0, TOP_N);
+        r.received = all.length;
+        r.receivedValid = all.filter((c) => c.valid).length;
       } catch (e) {
-        result.error = (e as Error).message;
+        r.error = (e as Error).message;
       }
-      lastRun.push(result);
+      r.pending = false;
       done++;
       progress();
       renderDetail();
@@ -341,36 +381,44 @@ $('btn-run').onclick = async () => {
 
   $<HTMLButtonElement>('btn-run').disabled = false;
   $<HTMLButtonElement>('btn-stop').disabled = true;
-  if (!lastRun.length) return;
-  results.push(summarize(model, mode, prompt.id, lastRun));
-  store.set('results', JSON.stringify(results));
-  renderSummary();
+  updateRetryButton();
   $('progress').textContent += stopRequested ? '（中止）' : '（完了）';
-};
+}
+
+function updateRetryButton() {
+  const n = lastRun.filter((r) => r.error).length;
+  const btn = $<HTMLButtonElement>('btn-retry');
+  btn.hidden = !n;
+  btn.disabled = !n;
+  btn.textContent = `エラーになった ${n} 件だけやり直す`;
+}
 
 $('btn-stop').onclick = () => {
   stopRequested = true;
 };
 
-function summarize(model: string, mode: string, promptId: PromptId, rs: TaskResult[]): Summary {
+function summarize(t: Target, mode: string, rs: TaskResult[]): Summary {
   const ok = rs.filter((r) => !r.error);
   const received = ok.reduce((a, r) => a + r.received, 0);
   const receivedValid = ok.reduce((a, r) => a + r.receivedValid, 0);
   let modeLabel = mode === 'sentence' ? '文単位' : '文節ごと';
   if (mode === 'segment') {
-    // 文の全文節が1位で当たった割合（実際の使い心地に近い）
+    // 文の全文節が1位で当たった割合（実際の使い心地に近い）。エラーを含む文は数えない
     const bySentence = new Map<number, boolean>();
     for (const r of rs) bySentence.set(r.sentence, (bySentence.get(r.sentence) ?? true) && !!r.candidates[0]?.correct);
-    const all = [...bySentence.values()];
+    const withError = new Set(rs.filter((r) => r.error).map((r) => r.sentence));
+    const all = [...bySentence].filter(([i]) => !withError.has(i)).map(([, v]) => v);
     modeLabel += `（文ごと全部1位 ${pct(all.filter(Boolean).length, all.length)}）`;
   }
-  const effortLabel = providerId === 'claude' && effort() !== 'default' ? ` / effort ${effort()}` : '';
+  const effortLabel = t.provider === 'claude' && t.effort !== 'default' ? ` / effort ${t.effort}` : '';
+  // 割合はエラーにならなかった問いの中で数える（混雑や回数制限で精度が低く見えないように）
+  const n = ok.length || 1;
   return {
-    model: `${PROVIDERS[providerId].label}: ${model}${effortLabel} / 指示文 ${promptId}`,
+    model: `${PROVIDERS[t.provider].label}: ${t.model}${effortLabel} / 指示文 ${t.prompt.id}`,
     mode: modeLabel,
     n: rs.length,
-    top1: ok.filter((r) => r.candidates[0]?.correct).length / rs.length,
-    top5: ok.filter((r) => r.candidates.some((c) => c.correct)).length / rs.length,
+    top1: ok.filter((r) => r.candidates[0]?.correct).length / n,
+    top5: ok.filter((r) => r.candidates.some((c) => c.correct)).length / n,
     // 並べ替え・絞り込みの前の、モデルが返した候補全体での割合
     validRate: received ? receivedValid / received : 0,
     avgMs: ok.length ? ok.reduce((a, r) => a + r.ms, 0) / ok.length : 0,
@@ -409,7 +457,7 @@ function renderDetail() {
     const cells = [
       r.vowels,
       r.goldText,
-      r.error ? `エラー：${r.error}` : r.candidates.map(candidateText).join('　'),
+      r.pending ? '（待ち）' : r.error ? `エラー：${r.error}` : r.candidates.map(candidateText).join('　'),
       r.ms ? (r.ms / 1000).toFixed(1) : '-',
     ];
     for (const v of cells) {
@@ -428,7 +476,7 @@ $('btn-copy').onclick = async () => {
   }
   if (lastRun.length) {
     lines.push('', '# 直近の実行（✓正解 ✗母音が合わない）');
-    for (const r of lastRun) {
+    for (const r of lastRun.filter((x) => !x.pending)) {
       lines.push(`${r.vowels} | ${r.goldText} | ${r.error ? `エラー：${r.error}` : r.candidates.map(candidateText).join(' ')}`);
     }
   }
@@ -444,6 +492,7 @@ $('btn-copy').onclick = async () => {
 $('btn-clear-results').onclick = () => {
   results = [];
   lastRun = [];
+  updateRetryButton();
   store.set('results', null);
   renderSummary();
   renderDetail();

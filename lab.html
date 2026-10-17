@@ -110,6 +110,7 @@
         <div class="row">
           <button id="btn-run" type="button" class="primary">実行</button>
           <button id="btn-stop" type="button" disabled>中止</button>
+          <button id="btn-retry" type="button" hidden></button>
           <span id="progress" class="note"></span>
         </div>
       </section>
@@ -124,6 +125,7 @@
             <tbody></tbody>
           </table>
         </div>
+        <p class="note">1位・5位以内の割合は、エラーにならなかった問いの中で数えています。エラーになった分は「3.」の「エラーになった〜件だけやり直す」で後から埋められます（API キーを入れ替えてからでも構いません）。</p>
         <div class="row">
           <button id="btn-copy" type="button">結果をコピー（チャットに貼る用）</button>
           <button id="btn-clear-results" type="button">結果を消す</button>

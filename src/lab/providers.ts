@@ -177,7 +177,7 @@ const sarashina: Provider = {
   },
   async generate(key, model, system, schema, user) {
     const call = (structured: boolean) =>
-      withRetryOn429(() =>
+      sarashinaRateLimit(() =>
         fetchJson(`${SARASHINA}/chat/completions`, {
           method: 'POST',
           headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
@@ -214,8 +214,8 @@ function jsonInstruction(schema: JsonSchema): string {
   return `次の形の JSON だけを返してください（説明やコードブロックは不要）：{"candidates": [{${fields}}]}`;
 }
 
-/** 回数制限（429）の時は少し待ってやり直す */
-async function withRetryOn429<T>(f: () => Promise<T>): Promise<T> {
+/** 無料ベータは1分あたりの回数が少ないので、429 なら（文面によらず）12秒ずつ待って最大1分ほどやり直す */
+async function sarashinaRateLimit<T>(f: () => Promise<T>): Promise<T> {
   for (let i = 0; ; i++) {
     try {
       return await f();
@@ -226,7 +226,38 @@ async function withRetryOn429<T>(f: () => Promise<T>): Promise<T> {
   }
 }
 
-export const PROVIDERS: Record<ProviderId, Provider> = { claude, gemini, openai, sarashina };
+/**
+ * 一時的なエラーなら待ってやり直す。
+ * 料金や1日の上限を使い切った 429（quota・billing）は待っても直らないので、すぐ諦める。
+ */
+async function retryTransient<T>(f: () => Promise<T>): Promise<T> {
+  const waits = [5000, 15000, 30000];
+  for (let i = 0; ; i++) {
+    try {
+      return await f();
+    } catch (e) {
+      const m = (e as Error).message;
+      const transient = /HTTP (5\d\d|429)/.test(m) && !/quota|billing|credit/i.test(m);
+      if (!transient || i >= waits.length) throw e;
+      await new Promise((r) => setTimeout(r, waits[i]));
+    }
+  }
+}
+
+/** 混雑（503 など）や1分あたりの回数制限（429）は、少し待ってやり直す */
+function withRetry(p: Provider): Provider {
+  return {
+    ...p,
+    generate: (...args) => retryTransient(() => p.generate(...args)),
+  };
+}
+
+export const PROVIDERS: Record<ProviderId, Provider> = {
+  claude: withRetry(claude),
+  gemini: withRetry(gemini),
+  openai: withRetry(openai),
+  sarashina: withRetry(sarashina),
+};
 
 async function fetchJson(url: string, init: RequestInit) {
   let res: Response;
@@ -244,7 +275,7 @@ async function fetchJson(url: string, init: RequestInit) {
     } catch {
       // JSON でなければ本文をそのまま
     }
-    throw new Error(`HTTP ${res.status}: ${message.slice(0, 300)}`);
+    throw new Error(`HTTP ${res.status}: ${message.split('\n')[0].slice(0, 200)}`);
   }
   return JSON.parse(body);
 }
