@@ -4,7 +4,7 @@ import type { AiEffort, AiProvider } from './types';
 
 /**
  * 母音入力の変換（1文節ずつ）。母音ラボ（lab.html）で測った方式をそのまま使う：
- * 1文節なら指示文 v2、区切った複数の文節なら v3（v2 に、1区切り＝ちょうど1文節の決まりを加えたもの）。
+ * 1文節なら指示文 v2、区切った複数の文節なら v4（v2 に、1区切りに自立語は1つまで・細かい区切りも可、の決まりを加えたもの）。
  * ラボの文節ごとの測定では、1文節に v3 を使うと母音の合う候補が減り、文頭の文節で正解が5位以内に入らないことが増えたため。
  * っ・ー は母音で表す、前の文節までの確定した文を文脈として付ける、母音が入力と合わない候補は捨てる。
  */
@@ -49,7 +49,7 @@ export async function convertPhrase(
   const style = 'fold';
   vowels = vowels.trim().replace(/ +/g, ' ');
   const multi = vowels.includes(' ');
-  const prompt = multi ? PROMPTS.v3 : PROMPTS.v2;
+  const prompt = multi ? PROMPTS.v4 : PROMPTS.v2;
   let user = userPrompt(context.slice(-CONTEXT_CHARS), vowels);
   if (exclude.length) user += `\n次の候補は違いました。これらとは別の候補を挙げてください：${exclude.join('、')}`;
   const settled = await Promise.allSettled(

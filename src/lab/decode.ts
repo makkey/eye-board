@@ -7,8 +7,19 @@ const STRICT_SEGMENTS = `- 空白は文節の区切りです。区切りと区�
   例：「あめが ふって います」は3つの文節です。「けさからあめ ふって」のように1つの区切りに2つの文節（けさから／あめ）を入れたり、1つの文節を2つに分けたりした候補は出さないでください。
 - 候補の reading には、入力と同じ数・同じ位置に空白を入れてください（区切りごとの拍の数も入力と同じになります）。`;
 
-/** 母音の規則（全版共通。strict は文節の区切りを厳密にする） */
-function rules(style: VowelStyle, strict = false): string {
+/**
+ * v4：区切りは利用者が決めた言葉の切れ目。1区切りに自立語は1つまで（詰め込みは不可）だが、
+ * 助詞を独立させたり複合語を分けたりする細かい区切りは許す（細かく区切ると当たりやすくなることがあるため）
+ */
+const WORD_SEGMENTS = `- 空白は利用者が入れた言葉の区切りです。候補は必ず区切りの位置で言葉が切れるようにしてください。
+- 1つの区切りの中に、名詞・動詞・形容詞などの自立語を2つ以上入れないでください。例：「けさからあめ」のように けさ と あめ を1つの区切りに入れるのは不可です。
+- 助詞・助動詞は、前の言葉と同じ区切りでも、それだけで1つの区切りでも構いません（「たまごが」も「たまご が」もありえます）。複合語は1つの区切りでも、分けて「なま たまご」のように区切っても構いません。
+- 候補の reading には、入力と同じ数・同じ位置に空白を入れてください（区切りごとの拍の数も入力と同じになります）。`;
+
+type SegmentRule = 'loose' | 'strict' | 'word';
+
+/** 母音の規則（全版共通。segments は空白の意味の決め方） */
+function rules(style: VowelStyle, segments: SegmentRule = 'loose'): string {
   const special =
     style === 'fold'
       ? `- 「ん」はそのまま入力されます。
@@ -22,7 +33,7 @@ function rules(style: VowelStyle, strict = false): string {
 - 拗音（きゃ・しゅ・ちょ など）は1拍で、ゃ→あ、ゅ→う、ょ→お です。
 ${special}
 - 母音は書いたかなの通りです。助詞の「は」は あ、「を」は お、「へ」は え。「とう」「こう」は お う、「せい」は え い。
-${strict ? STRICT_SEGMENTS : LOOSE_SEGMENTS}`;
+${segments === 'strict' ? STRICT_SEGMENTS : segments === 'word' ? WORD_SEGMENTS : LOOSE_SEGMENTS}`;
 }
 
 /** v1：規則だけを伝える */
@@ -41,12 +52,12 @@ const V2_EXAMPLES: [string, string][] = [
 ];
 
 /** v2：例と自己確認を加え、候補を多めに出させる（母音が合わないものは受け取った側で捨てる）。v3 は区切りを厳密に */
-const systemV2 = (style: VowelStyle, strict = false) => {
+const systemV2 = (style: VowelStyle, segments: SegmentRule = 'loose') => {
   const examples = V2_EXAMPLES.map(([reading, text]) => {
     const v = toVowels(reading, style);
     return `- 「${v}」→ reading「${reading}」、vowels「${v}」、text「${text}」`;
   }).join('\n');
-  return `${rules(style, strict)}
+  return `${rules(style, segments)}
 
 入力された母音列に当てはまる、日常会話として自然な日本語を、可能性が高い順に最大10個挙げてください。
 
@@ -88,7 +99,7 @@ function candidatesSchema(fields: string[]) {
 }
 
 export type JsonSchema = ReturnType<typeof candidatesSchema>;
-export type PromptId = 'v1' | 'v2' | 'v3';
+export type PromptId = 'v1' | 'v2' | 'v3' | 'v4';
 
 export interface PromptVersion {
   id: PromptId;
@@ -115,7 +126,15 @@ export const PROMPTS: Record<PromptId, PromptVersion> = {
   v3: {
     id: 'v3',
     label: 'v3（v2＋1区切り＝1文節を厳密に・区切り位置まで合う候補を先に）',
-    system: (style) => systemV2(style, true),
+    system: (style) => systemV2(style, 'strict'),
+    schema: candidatesSchema(['reading', 'vowels', 'text']),
+    validFirst: true,
+    exactFirst: true,
+  },
+  v4: {
+    id: 'v4',
+    label: 'v4（v2＋1区切りに自立語は1つまで・細かい区切りも可・区切り位置まで合う候補を先に）',
+    system: (style) => systemV2(style, 'word'),
     schema: candidatesSchema(['reading', 'vowels', 'text']),
     validFirst: true,
     exactFirst: true,

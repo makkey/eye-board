@@ -83,7 +83,7 @@ describe('convertPhrase', () => {
     expect(sent[1]).toContain('全部をまとめて');
   });
 
-  it('1文節は v2、区切った複数の文節は 1区切り＝1文節を厳密にした v3 で聞く', async () => {
+  it('1文節は v2、区切った複数の文節は 詰め込みを禁じた v4 で聞く', async () => {
     const systems: string[] = [];
     const gen: Generate = async (system) => {
       systems.push(system);
@@ -91,8 +91,8 @@ describe('convertPhrase', () => {
     };
     await convertPhrase('', 'あえ', gen);
     await convertPhrase('', 'あえ あえ', gen);
-    expect(systems[0]).not.toContain('ちょうど1つの文節');
-    expect(systems[1]).toContain('ちょうど1つの文節');
+    expect(systems[0]).not.toContain('自立語を2つ以上');
+    expect(systems[1]).toContain('自立語を2つ以上');
   });
 });
 
