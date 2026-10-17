@@ -35,6 +35,14 @@ export function userPrompt(context: string, vowels: string): string {
   return `ここまでの文: ${context}\n続きの母音列（空白で区切った複数の文節。次の文節だけでなく、全部をまとめて1つの続きとして候補にしてください）: ${vowels}`;
 }
 
+/** 変換の途中経過（候補が無かった時に、何がはじかれたかを見せるため） */
+export interface ConvertInfo {
+  /** AI が返した候補の数（全回の合計） */
+  received: number;
+  /** 母音や最初の音が合わずに捨てた候補 */
+  rejected: { text: string; reading: string; reason: 'vowels' | 'head' }[];
+}
+
 /**
  * 母音の並び（1文節、または空白で区切った複数の文節）を変換して、表記の候補を最大 TOP_N 個返す。
  * runs 回同時に聞いて順位を合算する。exclude（もう見せた候補）は除いて、別の候補を探させる。
@@ -49,6 +57,9 @@ export async function convertPhrase(
   runs = 1,
   exclude: string[] = [],
   heads: (string | null)[] = [],
+  info?: ConvertInfo,
+  /** 問い合わせの最後に付け足す注意（聞き直す時など） */
+  note = '',
 ): Promise<string[]> {
   const style = 'fold';
   vowels = vowels.trim().replace(/ +/g, ' ');
@@ -63,6 +74,7 @@ export async function convertPhrase(
     user += `\n最初の音のヒント（濁点・半濁点の有無や、きゃ・しょ のような小さい字が付くかは問わない）: ${hints.join('／')}`;
   }
   if (exclude.length) user += `\n次の候補は違いました。これらとは別の候補を挙げてください：${exclude.join('、')}`;
+  if (note) user += `\n${note}`;
   const settled = await Promise.allSettled(
     Array.from({ length: Math.max(1, runs) }, () => generate(prompt.system(style), prompt.schema, user)),
   );
@@ -74,7 +86,15 @@ export async function convertPhrase(
       continue;
     }
     try {
-      lists.push(judge(s.value, vowels, '', '', true, style, multi).filter((c) => c.valid && headsMatch(c.reading, segments, heads)));
+      const all = judge(s.value, vowels, '', '', true, style, multi);
+      const ok = all.filter((c) => c.valid && headsMatch(c.reading, segments, heads));
+      if (info) {
+        info.received += all.length;
+        for (const c of all) {
+          if (!ok.includes(c)) info.rejected.push({ text: c.text, reading: c.reading, reason: c.valid ? 'head' : 'vowels' });
+        }
+      }
+      lists.push(ok);
     } catch (e) {
       firstError ??= e;
     }

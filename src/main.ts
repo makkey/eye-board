@@ -17,6 +17,7 @@ import type { TextKey } from './i18n';
 import { ALL_CLASSES, ALL_DIRS, DIR_ARROW, FLOWER_DIRS } from './types';
 import type { AiEffort, AiProvider, Dir, GazeClass, Item, JaInput, Row, Settings, SideDir } from './types';
 import { DEFAULT_MODELS, PROVIDER_LABELS, atSentenceStart, convertPhrase, loadKey, providerGenerate, saveKey } from './vowelime';
+import type { ConvertInfo } from './vowelime';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -282,16 +283,26 @@ async function startConversion(more: boolean) {
   renderKeyboard();
   const model = settings.aiModel.trim() || DEFAULT_MODELS[settings.aiProvider];
   try {
-    const cands = await convertPhrase(
-      text,
-      vowels,
-      providerGenerate(settings.aiProvider, key, model, settings.aiEffort),
-      // 文頭の1文節は文脈が無く外れやすいので、少なくとも2回聞いて候補を広げる（同時に聞くので待ち時間はほぼ同じ）
-      atSentenceStart(text) && !vowels.trim().includes(' ') ? Math.max(2, settings.aiRuns) : settings.aiRuns,
-      shown,
-      pendingHeads(),
-    );
+    const generate = providerGenerate(settings.aiProvider, key, model, settings.aiEffort);
+    // 文頭は文脈が無く外れやすいので、少なくとも2回聞いて候補を広げる（同時に聞くので待ち時間はほぼ同じ）
+    const runs = atSentenceStart(text) ? Math.max(2, settings.aiRuns) : settings.aiRuns;
+    const heads = pendingHeads();
+    const info: ConvertInfo = { received: 0, rejected: [] };
+    let cands = await convertPhrase(text, vowels, generate, runs, shown, heads, info);
     if (token !== convToken) return;
+    if (!cands.length && info.rejected.length) {
+      // 返ってきた候補が全部はじかれた：理由を伝えて1回だけ聞き直す。
+      // 最初の音の行が違うものは確実に違うので除く。母音が合わないものは表記が正しくて読みだけ違うこともあるので、
+      // 除かずに読みを確かめてもらう
+      const compactText = (s: string) => s.replace(/[\s　]+/g, '');
+      const wrongHead = [...new Set(info.rejected.filter((r) => r.reason === 'head').map((r) => compactText(r.text)))];
+      const badReading = [...new Set(info.rejected.filter((r) => r.reason === 'vowels').map((r) => `${compactText(r.text)}（${r.reading}）`))];
+      const note = badReading.length
+        ? `前の答えの次の候補は、読みを規則どおり母音に直すと入力と合いませんでした。拍の数と読み方を確かめてください：${badReading.slice(0, 5).join('、')}`
+        : '';
+      cands = await convertPhrase(text, vowels, generate, runs, [...shown, ...wrongHead], heads, info, note);
+      if (token !== convToken) return;
+    }
     if (!cands.length) {
       feedback.play('cancel');
       if (more && lastCands.length) {
@@ -303,6 +314,11 @@ async function startConversion(more: boolean) {
         conv = 'idle';
         engine.leaveRow();
         say(t('jv.noCandidates'));
+        if (info.rejected.length) {
+          // 何がはじかれたかを見せる（読み上げはしない）
+          const ex = [...new Set(info.rejected.map((r) => `${r.text}（${r.reading}）`))].slice(0, 3).join('、');
+          notice = { text: t('jv.noCandidatesDetail', { n: info.received, ex }), until: performance.now() + 15000 };
+        }
       }
       renderKeyboard();
       return;
