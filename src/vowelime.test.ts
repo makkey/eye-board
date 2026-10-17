@@ -58,4 +58,15 @@ describe('convertPhrase', () => {
     };
     await expect(convertPhrase('', 'あえ', gen)).rejects.toThrow('HTTP 401');
   });
+
+  it('別の候補：もう見せた候補を伝え、返ってきても除く', async () => {
+    let sent = '';
+    const gen: Generate = async (_s, _sc, user) => {
+      sent = user;
+      return reply(['わかったのは', '分かったのは'], ['なまたまごが', '生卵が'], ['かかったのは', 'かかったのは']);
+    };
+    expect(await convertPhrase('', 'ああああおあ', gen, 1, ['分かったのは', 'かかったのは'])).toEqual(['生卵が']);
+    expect(sent).toContain('別の候補');
+    expect(sent).toContain('分かったのは、かかったのは');
+  });
 });

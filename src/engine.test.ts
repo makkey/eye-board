@@ -373,3 +373,44 @@ describe('InputEngine（母音入力）', () => {
     expect(engine.stage).toBe('row');
   });
 });
+
+describe('InputEngine（2段目の closeItem）', () => {
+  const cands: Row = {
+    id: 'cand',
+    label: '候補',
+    speak: '候補',
+    items: [{ kind: 'char', ch: '分かったのは' }, null, null, null, null],
+    noIdle: true,
+    closeItem: { kind: 'action', action: 'more', label: '別の候補', speak: '別の候補' },
+  };
+  function withRow(steps: [Dir | 'closed', number][]) {
+    const log: string[] = [];
+    const engine = new InputEngine(
+      SETTINGS,
+      {
+        commit: (i) => log.push(itemLabel(i)),
+        retract: (i) => log.push(`retract:${itemLabel(i)}`),
+        cancel: (r) => log.push(`cancel:${r}`),
+      },
+      VOWEL_KEYMAP,
+    );
+    let t = 0;
+    const feed = (what: Dir | 'closed', ms: number) => {
+      for (let i = 0; i < ms; i += 10, t += 10) engine.update({ t, faceFound: true, dir: what === 'closed' ? 'C' : what, closed: what === 'closed' });
+    };
+    feed('C', 300);
+    engine.openRow(cands, t);
+    for (const [w, ms] of steps) feed(w, ms);
+    return { log, engine };
+  }
+
+  it('目を閉じると「別の候補」', () => {
+    expect(withRow([['closed', 800], ['C', 300]]).log).toEqual(['別の候補']);
+  });
+
+  it('閉じ続けると取り消して1段目へ', () => {
+    const { log, engine } = withRow([['closed', 2300], ['C', 300]]);
+    expect(log).toEqual(['別の候補', 'retract:別の候補', 'cancel:close']);
+    expect(engine.stage).toBe('row');
+  });
+});

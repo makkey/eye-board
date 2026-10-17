@@ -39,7 +39,8 @@ export type Action =
   | 'clear'
   | 'undo'
   | 'speak'
-  | 'convert'; // 母音入力：ここまでの母音を1文節として AI に変換させる
+  | 'convert' // 母音入力：ここまでの母音を1文節として AI に変換させる
+  | 'more'; // 母音入力：まだ出ていない別の候補を AI に聞く
 
 export type Item =
   | { kind: 'char'; ch: string; speak?: string; label?: string }
@@ -57,6 +58,11 @@ export interface Row {
   direct?: Item;
   /** 何もしなくても1段目へ戻らない（変換候補を読んで選ぶ間など） */
   noIdle?: boolean;
+  /**
+   * 2段目で目を閉じた時に、1段目へ戻る代わりにこれを入力する（母音入力の「別の候補」）。
+   * そのまま longMs まで閉じ続けると取り消して1段目へ戻る
+   */
+  closeItem?: Item;
 }
 
 export type Lang = 'ja' | 'en';

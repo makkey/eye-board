@@ -25,12 +25,20 @@ export type Generate = (system: string, schema: JsonSchema, user: string) => Pro
 
 /**
  * 母音の並び（1文節）を変換して、表記の候補を最大 TOP_N 個返す。
- * runs 回同時に聞いて順位を合算する。母音が合う候補が1つもなければ空の配列
+ * runs 回同時に聞いて順位を合算する。exclude（もう見せた候補）は除いて、別の候補を探させる。
+ * 母音が合う候補が1つもなければ空の配列
  */
-export async function convertPhrase(context: string, vowels: string, generate: Generate, runs = 1): Promise<string[]> {
+export async function convertPhrase(
+  context: string,
+  vowels: string,
+  generate: Generate,
+  runs = 1,
+  exclude: string[] = [],
+): Promise<string[]> {
   const prompt = PROMPTS.v2;
   const style = 'fold';
-  const user = segmentPrompt(context.slice(-CONTEXT_CHARS), vowels);
+  let user = segmentPrompt(context.slice(-CONTEXT_CHARS), vowels);
+  if (exclude.length) user += `\n次の候補は違いました。これらとは別の候補を挙げてください：${exclude.join('、')}`;
   const settled = await Promise.allSettled(
     Array.from({ length: Math.max(1, runs) }, () => generate(prompt.system(style), prompt.schema, user)),
   );
@@ -52,7 +60,7 @@ export async function convertPhrase(context: string, vowels: string, generate: G
   for (const c of mergeRuns(lists, true)) {
     // 文節の中の区切りの空白は本文に入れない
     const text = c.text.replace(/[\s　]+/g, '');
-    if (text && !texts.includes(text)) texts.push(text);
+    if (text && !texts.includes(text) && !exclude.includes(text)) texts.push(text);
   }
   return texts.slice(0, TOP_N);
 }

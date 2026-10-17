@@ -42,6 +42,9 @@ let vowels = '';
 let conv: 'idle' | 'waiting' | 'choosing' = 'idle';
 /** 問い合わせごとの番号（やめた・やり直した問い合わせの返事を無視するため） */
 let convToken = 0;
+/** 今の母音について、これまでに見せた候補（「別の候補」で除く）と、直近に並べた候補 */
+let shown: string[] = [];
+let lastCands: string[] = [];
 /** しばらく案内欄に出すお知らせ（エラーなど） */
 let notice: { text: string; until: number } | null = null;
 const VOWEL_CHARS = new Set([...'あいうえおん']);
@@ -87,6 +90,7 @@ const engine = new InputEngine(settings, {
       // 変換中・候補から、目を閉じて入力にもどった（入れた母音はそのまま）
       void feedback.say(t(conv === 'waiting' ? 'jv.cancelled' : 'jv.backToInput'));
       conv = 'idle';
+      notice = null;
       convToken++;
     } else {
       void feedback.say(t(reason === 'idle' ? 'say.cancel' : 'say.back'));
@@ -94,6 +98,12 @@ const engine = new InputEngine(settings, {
     renderKeyboard();
   },
   retract(item) {
+    if (item.kind === 'action' && item.action === 'more') {
+      // 「別の候補」を頼んだが、閉じ続けたので入力にもどる（この後 cancel が来る）
+      conv = 'choosing';
+      convToken++;
+      return;
+    }
     if (item.kind === 'action' && item.action === 'convert') {
       // 変換しようとしたが、閉じ続けて記号に切り替えた：問い合わせはやめる
       conv = 'idle';
@@ -168,7 +178,10 @@ function applyVowelItem(item: Item) {
   }
   switch (item.action) {
     case 'convert':
-      void startConversion();
+      void startConversion(false);
+      return;
+    case 'more':
+      void startConversion(true);
       return;
     case 'backspace':
       // 入力中の母音があればそれを1つ消す
@@ -199,7 +212,8 @@ function say(msg: string) {
 /** 「変換中」の間の2段目（選べるものはない。目を閉じるとやめる） */
 const WAIT_ROW: Row = { id: 'jv-wait', label: t('jv.waiting'), speak: '', items: [null, null, null, null, null], noIdle: true };
 
-async function startConversion() {
+/** more：今の母音で、まだ見せていない別の候補を聞く */
+async function startConversion(more: boolean) {
   if (!vowels) {
     say(t('jv.noVowels'));
     return;
@@ -212,6 +226,7 @@ async function startConversion() {
   const token = ++convToken;
   conv = 'waiting';
   notice = null;
+  if (!more) shown = [];
   engine.openRow({ ...WAIT_ROW, label: t('jv.waiting') }, performance.now());
   renderKeyboard();
   const model = settings.aiModel.trim() || DEFAULT_MODELS[settings.aiProvider];
@@ -221,16 +236,26 @@ async function startConversion() {
       vowels,
       providerGenerate(settings.aiProvider, key, model, settings.aiEffort),
       settings.aiRuns,
+      shown,
     );
     if (token !== convToken) return;
     if (!cands.length) {
-      conv = 'idle';
-      engine.leaveRow();
-      renderKeyboard();
       feedback.play('cancel');
-      say(t('jv.noCandidates'));
+      if (more && lastCands.length) {
+        // 別の候補が無ければ、前の候補にもどして選べるようにする
+        say(t('jv.noMore'));
+        conv = 'choosing';
+        engine.openRow(candidateRow(lastCands, token), performance.now());
+      } else {
+        conv = 'idle';
+        engine.leaveRow();
+        say(t('jv.noCandidates'));
+      }
+      renderKeyboard();
       return;
     }
+    shown.push(...cands);
+    lastCands = cands;
     conv = 'choosing';
     engine.openRow(candidateRow(cands, token), performance.now());
   } catch (e) {
@@ -247,7 +272,15 @@ async function startConversion() {
 /** 変換候補を ← ↖ ↑ ↗ → に並べた2段目（1番目の候補が ←） */
 function candidateRow(cands: string[], token: number): Row {
   const items = FLOWER_DIRS.map((_, i) => (cands[i] ? ({ kind: 'char', ch: cands[i] } as Item) : null));
-  return { id: `jv-cand-${token}`, label: t('jv.candidates'), speak: t('jv.candidatesSay', { first: cands[0] }), items, noIdle: true };
+  return {
+    id: `jv-cand-${token}`,
+    label: t('jv.candidates'),
+    speak: t('jv.candidatesSay', { first: cands[0] }),
+    items,
+    noIdle: true,
+    // 目を閉じると別の候補、閉じ続けると入力にもどる
+    closeItem: { kind: 'action', action: 'more', label: t('jv.more'), speak: t('jv.more') },
+  };
 }
 
 $('btn-speak').onclick = () => void feedback.say(text || t('say.empty'), true);
@@ -321,7 +354,10 @@ function renderKeyboard() {
       const back = document.createElement('div');
       back.className = 'cell back';
       back.id = 'cell-close';
-      back.innerHTML = `<span class="hint">${t('key.closeHint')}</span><span class="main small">${t('char.back')}</span>`;
+      // 変換候補では、目を閉じると別の候補、閉じ続けると入力にもどる
+      const label = row.closeItem ? itemLabel(row.closeItem) : t('char.back');
+      const long = row.closeItem ? `<span class="long">${t('key.long', { label: t('jv.backToInput') })}</span>` : '';
+      back.innerHTML = `<span class="hint">${t('key.closeHint')}</span><span class="main small">${label}</span>${long}`;
       keyboardEl.append(back);
     } else {
       const item = row.items[flowerIndex(pos)];
@@ -408,7 +444,7 @@ function updateView(now: number) {
   let marker: number | null = null;
   if (engine.closedStart !== null) {
     const dur = now - engine.closedStart;
-    if (engine.stage === 'row' || engine.closeCanSwitch) {
+    if (engine.stage === 'row' || engine.closeCanSwitch || engine.row?.closeItem) {
       // 1段目：0.6秒で な行（スペース）、2秒で 記号
       fill = dur / settings.longMs;
       marker = settings.closeMinMs / settings.longMs;
@@ -440,8 +476,12 @@ function updateView(now: number) {
     main = t('st.closed');
     const longName = engine.keymap.closeLong.label;
     if (!engine.closeDone) {
-      sub = engine.stage === 'row' ? t('st.keepClosedFor', { name: closeShortName() }) : t('st.keepClosedBack');
+      if (engine.stage === 'row') sub = t('st.keepClosedFor', { name: closeShortName() });
+      else sub = engine.row?.closeItem ? t('jv.keepClosedMore') : t('st.keepClosedBack');
     } else if (engine.closeAction === 'back') sub = t('st.wentBack');
+    else if (engine.closeAction === 'rowItem' && engine.closeCanSwitch) {
+      sub = t('st.selectedCanSwitch', { name: t('jv.more'), long: t('jv.backToInput') });
+    } else if (engine.closeAction === 'rowItem') sub = t('st.wentBack');
     else if (engine.closeCanSwitch) sub = t('st.selectedCanSwitch', { name: closeShortName(), long: longName });
     else sub = t('st.selectedOpen', { name: engine.row?.label ?? '' });
   } else if (engine.stage === 'row') {

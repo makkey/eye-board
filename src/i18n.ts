@@ -29,7 +29,7 @@ const JA = {
 <p><b>母音入力</b>：各拍の母音だけを入れ、文節ごとに AI が漢字かな交じりに変換します（例：「きのうは」→ い・お・う・あ）。</p>
 <ol>
   <li>← あ・↖ い・↑ う・↗ え・→ お を見て戻ると1拍入ります。ん は ↖ を2秒。っ は次の音の母音、ー は前の音の母音で入れます（とって → お・え・え）。</li>
-  <li>1文節（「昨日は」など）入れたら<b>目を閉じる</b>と変換。候補が ← ↖ ↑ ↗ → に並ぶので、見て戻ると確定します。目を閉じると入力にもどります。</li>
+  <li>1文節（「昨日は」など）入れたら<b>目を閉じる</b>と変換。候補が ← ↖ ↑ ↗ → に並ぶので、見て戻ると確定します。どれも違う時は<b>目を閉じる</b>と、まだ出ていない別の候補を聞き直します。<b>2秒閉じ続ける</b>と入力にもどります（入れた母音は残ります）。</li>
   <li>← を2秒で編集（続けて ← で1拍削除）、目を閉じ続けると記号（、。？！改行）。</li>
   <li>設定で AI の会社と API キーを入れて使います（キーはこのブラウザだけに保存）。</li>
 </ol>
@@ -140,7 +140,10 @@ const JA = {
   'jv.waiting': '変換中…',
   'jv.waitingSub': '目を閉じる（下を見る）→ やめる',
   'jv.choose': '候補を選ぶ',
-  'jv.chooseSub': '← ↖ ↑ ↗ → を見て戻る　／　目を閉じる（下を見る）→ 入力にもどる',
+  'jv.chooseSub': '← ↖ ↑ ↗ → を見て戻る　／　目を閉じる（下を見る）→ 別の候補（2秒で入力にもどる）',
+  'jv.more': '別の候補',
+  'jv.noMore': 'ほかの候補が見つかりませんでした',
+  'jv.keepClosedMore': 'そのまま閉じていると 別の候補（2秒で入力にもどる）',
   'jv.candidates': '候補',
   'jv.candidatesSay': '候補。{first}',
   'jv.noVowels': '母音が入力されていません',
@@ -287,7 +290,10 @@ const EN: Record<TextKey, string> = {
   'jv.waiting': 'Converting…',
   'jv.waitingSub': 'Close eyes (look down) → stop',
   'jv.choose': 'Choose a candidate',
-  'jv.chooseSub': 'Look ← ↖ ↑ ↗ →, then back · Close eyes (look down) → back to input',
+  'jv.chooseSub': 'Look ← ↖ ↑ ↗ →, then back · Close eyes (look down) → more candidates (2s: back to input)',
+  'jv.more': 'More',
+  'jv.noMore': 'No other candidates found',
+  'jv.keepClosedMore': 'Keep closed for more candidates (2s: back to input)',
   'jv.candidates': 'Candidates',
   'jv.candidatesSay': 'Candidates. {first}',
   'jv.noVowels': 'No vowels entered',

@@ -51,8 +51,10 @@ export class InputEngine {
   closedStart: number | null = null;
   /** 今回目を閉じている間に、閉じる操作をもう実行したか（開けるまで次は受け付けない） */
   closeDone = false;
-  /** 今回の閉じる操作で何をしたか：行に入った／1文字入れた／2段目から戻った */
-  closeAction: 'row' | 'item' | 'back' | null = null;
+  /** 今回の閉じる操作で何をしたか：行に入った／1文字入れた／2段目から戻った／2段目の closeItem を入れた */
+  closeAction: 'row' | 'item' | 'back' | 'rowItem' | null = null;
+  /** closeAction が rowItem の時に入れたもの（閉じ続けたら取り消す） */
+  private closeItem: Item | null = null;
   /** 閉じ続けると closeLong に切り替わる状態か */
   closeCanSwitch = false;
 
@@ -156,7 +158,11 @@ export class InputEngine {
       // 閉じたまま longMs に達したら closeLong（記号）に切り替える
       if (this.closeCanSwitch && dur >= this.settings.longMs) {
         this.closeCanSwitch = false;
-        if (this.closeAction === 'item' && km.closeShort.kind === 'item') {
+        if (this.closeAction === 'rowItem' && this.closeItem) {
+          // 2段目の「別の候補」を、閉じ続けたので取り消して1段目へ戻る
+          this.events.retract?.(this.closeItem);
+          this.cancel('close');
+        } else if (this.closeAction === 'item' && km.closeShort.kind === 'item') {
           this.events.retract?.(km.closeShort.item);
           this.enterChar(km.closeLong, t);
         } else {
@@ -176,6 +182,14 @@ export class InputEngine {
     this.pendingDir = 'C';
     this.held = 0;
     if (this.stage === 'char') {
+      const item = this.row?.closeItem;
+      if (item) {
+        this.closeAction = 'rowItem';
+        this.closeItem = item;
+        this.closeCanSwitch = true;
+        this.commitItem(item);
+        return;
+      }
       this.closeAction = 'back';
       this.cancel('close');
       return;

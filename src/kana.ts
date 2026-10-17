@@ -81,6 +81,7 @@ export function applyItem(text: string, item: Item): string {
     case 'undo':
     case 'speak':
     case 'convert': // 母音入力の変換は呼び出し側で扱う
+    case 'more':
       return text;
   }
 }
