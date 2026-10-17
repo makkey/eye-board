@@ -1,5 +1,5 @@
-import { LONG_ROW_BY_DIR, ROWS, ROW_BY_DIR, flowerIndex } from './layout';
-import type { Dir, GazeFrame, Item, Row, Settings } from './types';
+import { JA_KEYMAP, flowerIndex } from './layout';
+import type { Dir, GazeFrame, Item, Keymap, Row, Settings, SideDir } from './types';
 
 export type Candidate =
   | { kind: 'row'; row: Row; long: boolean }
@@ -14,6 +14,8 @@ export interface EngineEvents {
   itemCandidate?(item: Item): void;
   /** 文字・操作が確定した */
   commit?(item: Item): void;
+  /** 目を閉じて入れた1文字（英語のスペース）を、閉じ続けたので取り消す */
+  retract?(item: Item): void;
   /** 何も選ばずに1段目へ戻った */
   cancel?(reason: 'close' | 'idle'): void;
   /** 安定した視線方向が変わった */
@@ -25,9 +27,10 @@ export interface EngineEvents {
  *
  * 「目を閉じる」と「下を見る」はカメラから区別できないので、同じ1つの操作（closed）として扱う。
  *
- * 1段目（行）
+ * 1段目（行）。どの行・文字になるかは keymap（言語ごとのキー配置）で決まる
  * - 方向を selectMs 見続けると候補、中央に戻ると確定。longMs 見続けると別の行に切り替わる
- * - 目を closeMinMs 閉じ続けた時点で「な行」、そのまま longMs まで閉じ続けると「記号」
+ * - 目を closeMinMs 閉じ続けた時点で closeShort（日本語は「な行」、英語はスペースを入力）、
+ *   そのまま longMs まで閉じ続けると closeLong（記号）。英語のスペースはその時取り消す
  *   （閉じている間に決まるので、開けるタイミングは問わない）
  *
  * 2段目（フラワー配置：左から時計回りに あ・い・う・え・お）
@@ -48,8 +51,10 @@ export class InputEngine {
   closedStart: number | null = null;
   /** 今回目を閉じている間に、閉じる操作をもう実行したか（開けるまで次は受け付けない） */
   closeDone = false;
-  /** 今回目を閉じている間に1段目から「な行」に入ったか（閉じ続けると「記号」に切り替える） */
-  private closeEnteredRow = false;
+  /** 今回の閉じる操作で何をしたか：行に入った／1文字入れた／2段目から戻った */
+  closeAction: 'row' | 'item' | 'back' | null = null;
+  /** 閉じ続けると closeLong に切り替わる状態か */
+  closeCanSwitch = false;
 
   private pendingDir: Dir = 'C';
   private pendingSince = 0;
@@ -64,7 +69,13 @@ export class InputEngine {
   constructor(
     private settings: Settings,
     private events: EngineEvents = {},
+    public keymap: Keymap = JA_KEYMAP,
   ) {}
+
+  setKeymap(keymap: Keymap, t = 0) {
+    this.keymap = keymap;
+    this.reset(t);
+  }
 
   reset(t = 0) {
     this.stage = 'row';
@@ -76,6 +87,8 @@ export class InputEngine {
     this.held = 0;
     this.closedStart = null;
     this.closeDone = false;
+    this.closeAction = null;
+    this.closeCanSwitch = false;
     this.lastActivity = t;
     this.lastT = null;
     this.rawClosed = false;
@@ -94,6 +107,8 @@ export class InputEngine {
       this.closedStable = false;
       this.closedStart = null;
       this.closeDone = false;
+      this.closeAction = null;
+      this.closeCanSwitch = false;
       this.lastActivity = t;
       return;
     }
@@ -108,6 +123,8 @@ export class InputEngine {
       if (this.closedStable) {
         this.closedStart = this.rawClosedSince;
         this.closeDone = false;
+        this.closeAction = null;
+        this.closeCanSwitch = false;
       } else {
         this.onOpen(t);
       }
@@ -133,13 +150,19 @@ export class InputEngine {
   private updateClosed(t: number) {
     if (this.closedStart === null) return;
     const dur = t - this.closedStart;
+    const km = this.keymap;
 
     if (this.closeDone) {
-      // 閉じたまま longMs に達したら「な行」→「記号」に切り替える
-      if (this.closeEnteredRow && dur >= this.settings.longMs) {
-        this.closeEnteredRow = false;
-        this.row = ROWS[LONG_ROW_BY_DIR.C];
-        this.events.rowCommit?.(this.row);
+      // 閉じたまま longMs に達したら closeLong（記号）に切り替える
+      if (this.closeCanSwitch && dur >= this.settings.longMs) {
+        this.closeCanSwitch = false;
+        if (this.closeAction === 'item' && km.closeShort.kind === 'item') {
+          this.events.retract?.(km.closeShort.item);
+          this.enterChar(km.closeLong, t);
+        } else {
+          this.row = km.closeLong;
+          this.events.rowCommit?.(this.row);
+        }
       }
       return;
     }
@@ -152,18 +175,26 @@ export class InputEngine {
     this.dir = 'C';
     this.pendingDir = 'C';
     this.held = 0;
-    if (this.stage === 'row') {
-      this.enterChar(ROWS[ROW_BY_DIR.C], t);
-      this.closeEnteredRow = true;
-    } else {
+    if (this.stage === 'char') {
+      this.closeAction = 'back';
       this.cancel('close');
+      return;
+    }
+    this.closeCanSwitch = true;
+    if (km.closeShort.kind === 'row') {
+      this.closeAction = 'row';
+      this.enterChar(km.closeShort.row, t);
+    } else {
+      this.closeAction = 'item';
+      this.commitItem(km.closeShort.item);
     }
   }
 
   private onOpen(t: number) {
     this.closedStart = null;
     this.closeDone = false;
-    this.closeEnteredRow = false;
+    this.closeAction = null;
+    this.closeCanSwitch = false;
     this.lastActivity = t;
     // 開いた直後の視線は不安定なので、方向のデバウンスをやり直す
     this.pendingDir = this.dir;
@@ -202,10 +233,10 @@ export class InputEngine {
 
     if (this.stage === 'row') {
       if (!this.candidate && held >= s.selectMs) {
-        this.setRowCandidate(ROWS[ROW_BY_DIR[this.dir]], false);
+        this.setRowCandidate(this.keymap.rowByDir[this.dir as SideDir], false);
       }
       if (held >= s.longMs && this.candidate?.kind === 'row' && !this.candidate.long) {
-        this.setRowCandidate(ROWS[LONG_ROW_BY_DIR[this.dir]], true);
+        this.setRowCandidate(this.keymap.longRowByDir[this.dir as SideDir], true);
       }
       return;
     }

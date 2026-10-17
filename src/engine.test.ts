@@ -1,18 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { InputEngine } from './engine';
-import { itemLabel } from './layout';
+import { EN_KEYMAP, JA_KEYMAP, itemLabel } from './layout';
 import { DEFAULT_SETTINGS } from './settings';
 import type { Dir } from './types';
 
 /** 方向の列（[dir, ms] や ['closed', ms]）を 10ms 刻みで流し、確定した項目を返す */
-function run(steps: [Dir | 'closed', number][], settings = DEFAULT_SETTINGS) {
+function run(steps: [Dir | 'closed', number][], keymap = JA_KEYMAP) {
   const log: string[] = [];
   const rows: string[] = [];
-  const engine = new InputEngine(settings, {
-    rowCommit: (row) => rows.push(row.id),
-    commit: (item) => log.push(itemLabel(item)),
-    cancel: (reason) => log.push(`cancel:${reason}`),
-  });
+  const engine = new InputEngine(
+    DEFAULT_SETTINGS,
+    {
+      rowCommit: (row) => rows.push(row.id),
+      commit: (item) => log.push(itemLabel(item)),
+      retract: (item) => log.push(`retract:${itemLabel(item)}`),
+      cancel: (reason) => log.push(`cancel:${reason}`),
+    },
+    keymap,
+  );
   let t = 0;
   for (const [what, ms] of steps) {
     for (let i = 0; i < ms; i += 10) {
@@ -225,5 +230,53 @@ describe('InputEngine', () => {
       ['C', 300],
     ]);
     expect(log).toEqual(['け']);
+  });
+});
+
+describe('InputEngine（英語）', () => {
+  const en = (steps: [Dir | 'closed', number][]) => run(steps, EN_KEYMAP);
+
+  it('↑（F〜J）→ ↗ で i', () => {
+    const { log } = en([
+      ['C', 300],
+      ['U', 600],
+      ['C', 300],
+      ['UR', 600],
+      ['C', 300],
+    ]);
+    expect(log).toEqual(['I']);
+  });
+
+  it('目を閉じるとその場でスペース（2段目に入らない）', () => {
+    const { log, engine } = en([
+      ['C', 300],
+      ['closed', 800],
+      ['C', 300],
+    ]);
+    expect(log).toEqual(['␣']);
+    expect(engine.stage).toBe('row');
+  });
+
+  it('閉じ続けるとスペースを取り消して記号へ', () => {
+    const { log, rows } = en([
+      ['C', 300],
+      ['closed', 2500],
+      ['C', 300],
+      ['L', 600],
+      ['C', 300],
+    ]);
+    expect(log).toEqual(['␣', 'retract:␣', '.']);
+    expect(rows).toEqual(['en-symbols']);
+  });
+
+  it('→ 2秒で編集、← で削除', () => {
+    const { log } = en([
+      ['C', 300],
+      ['R', 2300],
+      ['C', 300],
+      ['L', 600],
+      ['C', 300],
+    ]);
+    expect(log).toEqual(['⌫Del']);
   });
 });

@@ -13,6 +13,7 @@ export const DEFAULT_SETTINGS: Settings = {
   tts: true,
   sound: true,
   ttsRate: 1.3,
+  lang: 'ja',
 };
 
 const KEY = 'eyeboard.settings.v1';

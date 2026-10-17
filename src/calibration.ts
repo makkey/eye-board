@@ -67,13 +67,13 @@ export class CalibrationRun {
   }
 
   async run(): Promise<Calibration> {
-    await this.feedback.say('キャリブレーションを始めます。顔は動かさず、目だけを大きく動かしてください。', true);
+    await this.feedback.say('キャリブレーションを始めます。顔は動かさず、目だけを大きく動かしてください。', true, 'ja');
     for (let i = 0; i < STEPS.length; i++) {
       const step = STEPS[i];
       const base = { index: i, total: STEPS.length, step };
       this.check();
       this.onProgress({ ...base, phase: 'announce', progress: 0 });
-      await this.feedback.say(stepInstruction(step), true);
+      await this.feedback.say(stepInstruction(step), true, 'ja');
       this.check();
       this.onProgress({ ...base, phase: 'settle', progress: 0 });
       await sleep(step === 'closed' ? SETTLE_MS + 300 : SETTLE_MS);
@@ -95,7 +95,7 @@ export class CalibrationRun {
       throw new Error('顔を見失うことが多すぎました。カメラの位置や明るさを確認してください。');
     }
     const cal = buildCalibration(this.samples);
-    await this.feedback.say('キャリブレーションが完了しました', true);
+    await this.feedback.say('キャリブレーションが完了しました', true, 'ja');
     return cal;
   }
 

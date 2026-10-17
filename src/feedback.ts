@@ -1,4 +1,4 @@
-import type { Settings } from './types';
+import type { Lang, Settings } from './types';
 
 type Tone = 'tick' | 'long' | 'commit' | 'cancel' | 'start' | 'done';
 
@@ -27,13 +27,15 @@ const TONES: Record<Tone, [number, number][]> = {
 /** 画面を見ていない間の手がかりになる音と読み上げ */
 export class Feedback {
   private ctx: AudioContext | null = null;
-  private voice: SpeechSynthesisVoice | null = null;
+  private voices: Partial<Record<Lang, SpeechSynthesisVoice>> = {};
 
   constructor(private settings: Settings) {
     if ('speechSynthesis' in window) {
       const pick = () => {
         const voices = speechSynthesis.getVoices();
-        this.voice = voices.find((v) => v.lang === 'ja-JP') ?? voices.find((v) => v.lang.startsWith('ja')) ?? null;
+        const find = (exact: string, prefix: string) =>
+          voices.find((v) => v.lang === exact) ?? voices.find((v) => v.lang.startsWith(prefix));
+        this.voices = { ja: find('ja-JP', 'ja'), en: find('en-US', 'en') };
       };
       pick();
       speechSynthesis.addEventListener?.('voiceschanged', pick);
@@ -63,14 +65,18 @@ export class Feedback {
     }
   }
 
-  /** 読み上げる。終わったら（または読み上げできなければすぐ）resolve */
-  say(text: string, force = false): Promise<void> {
+  /**
+   * 読み上げる。終わったら（または読み上げできなければすぐ）resolve。
+   * lang を省くと、入力中の言語（settings.lang）の声で読む
+   */
+  say(text: string, force = false, lang: Lang = this.settings.lang): Promise<void> {
     if ((!this.settings.tts && !force) || !('speechSynthesis' in window)) return Promise.resolve();
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'ja-JP';
+    u.lang = lang === 'en' ? 'en-US' : 'ja-JP';
     u.rate = this.settings.ttsRate;
-    if (this.voice) u.voice = this.voice;
+    const voice = this.voices[lang];
+    if (voice) u.voice = voice;
     return new Promise((resolve) => {
       const timer = setTimeout(resolve, 600 + text.length * 250);
       u.onend = u.onerror = () => {

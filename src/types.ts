@@ -7,6 +7,9 @@ export type Dir = 'C' | 'UL' | 'U' | 'UR' | 'L' | 'R';
 
 export const ALL_DIRS: Dir[] = ['C', 'UL', 'U', 'UR', 'L', 'R'];
 
+/** 中央以外の5方向（1段目の行・2段目の文字に割り当てる） */
+export type SideDir = Exclude<Dir, 'C'>;
+
 /** 分類器が区別するクラス：6方向＋目を閉じている（下を見ている） */
 export type GazeClass = Dir | 'closed';
 export const ALL_CLASSES: GazeClass[] = [...ALL_DIRS, 'closed'];
@@ -34,6 +37,7 @@ export const DIR_NAME_JA: Record<Dir, string> = {
 
 export type Action =
   | 'cycle' // ゛゜小 を順に切り替え
+  | 'case' // 直前の英字の大文字・小文字を切り替え
   | 'dakuten'
   | 'handakuten'
   | 'small'
@@ -45,7 +49,7 @@ export type Action =
   | 'speak';
 
 export type Item =
-  | { kind: 'char'; ch: string; speak?: string }
+  | { kind: 'char'; ch: string; speak?: string; label?: string }
   | { kind: 'action'; action: Action; label: string; speak: string };
 
 export interface Row {
@@ -56,6 +60,21 @@ export interface Row {
   speak: string;
   /** あ段・い段・う段・え段・お段の順（FLOWER_DIRS に対応）。空きは null */
   items: (Item | null)[];
+}
+
+export type Lang = 'ja' | 'en';
+
+/** 言語ごとのキー配置 */
+export interface Keymap {
+  lang: Lang;
+  /** 1段目：方向を短く見た時の行 */
+  rowByDir: Record<SideDir, Row>;
+  /** 1段目：方向を longMs 見続けた時の行 */
+  longRowByDir: Record<SideDir, Row>;
+  /** 1段目：目を閉じた（下を見た）時。行に入るか、その場で1文字入れるか */
+  closeShort: { kind: 'row'; row: Row } | { kind: 'item'; item: Item };
+  /** 1段目：そのまま longMs まで閉じ続けた時の行 */
+  closeLong: Row;
 }
 
 /** 1フレーム分の入力（視線分類後） */
@@ -80,4 +99,5 @@ export interface Settings {
   tts: boolean;
   sound: boolean;
   ttsRate: number;
+  lang: Lang;
 }

@@ -234,6 +234,10 @@ button[aria-pressed='true'] {
   font-size: clamp(1.6rem, 7vw, 2.4rem);
   line-height: 1.1;
 }
+.key .main.small {
+  font-size: clamp(1.1rem, 5vw, 1.6rem);
+  letter-spacing: 0.05em;
+}
 .key .sub {
   font-size: 0.8rem;
   color: var(--muted);

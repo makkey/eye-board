@@ -1,7 +1,7 @@
 import { FLOWER_DIRS } from './types';
-import type { Dir, Item, Row } from './types';
+import type { Dir, Item, Keymap, Lang, Row } from './types';
 
-const c = (ch: string, speak?: string): Item => ({ kind: 'char', ch, speak });
+const c = (ch: string, speak?: string, label?: string): Item => ({ kind: 'char', ch, speak, label });
 const a = (action: Extract<Item, { kind: 'action' }>['action'], label: string, speak: string): Item => ({
   kind: 'action',
   action,
@@ -9,12 +9,16 @@ const a = (action: Extract<Item, { kind: 'action' }>['action'], label: string, s
   speak,
 });
 
+// 2段目の items は ← ↖ ↑ ↗ → の順（FLOWER_DIRS）。空きは null
+
+// ---- 日本語 ----
+
 function kanaRow(id: string, chars: string): Row {
   const items = [...chars].map((ch) => c(ch));
   return { id, label: chars[0], speak: `${chars[0]}行`, items };
 }
 
-export const ROWS: Record<string, Row> = {
+const JA: Record<string, Row> = {
   a: kanaRow('a', 'あいうえお'),
   ka: kanaRow('ka', 'かきくけこ'),
   sa: kanaRow('sa', 'さしすせそ'),
@@ -61,25 +65,96 @@ export const ROWS: Record<string, Row> = {
   },
 };
 
-/** 1段目：視線方向 → 行（中央は「目を閉じる／下を見る」） */
-export const ROW_BY_DIR: Record<Dir, string> = {
-  UL: 'a',
-  U: 'ka',
-  UR: 'sa',
-  L: 'ta',
-  C: 'na',
-  R: 'ha',
+export const JA_KEYMAP: Keymap = {
+  lang: 'ja',
+  rowByDir: { UL: JA.a, U: JA.ka, UR: JA.sa, L: JA.ta, R: JA.ha },
+  longRowByDir: { UL: JA.ma, U: JA.ya, UR: JA.ra, L: JA.wa, R: JA.edit },
+  closeShort: { kind: 'row', row: JA.na },
+  closeLong: JA.kigo,
 };
 
-/** 1段目：longMs 見続けた時（中央は目を閉じ続けた時）に切り替わる行 */
-export const LONG_ROW_BY_DIR: Record<Dir, string> = {
-  UL: 'ma',
-  U: 'ya',
-  UR: 'ra',
-  L: 'wa',
-  C: 'kigo',
-  R: 'edit',
+// ---- 英語 ----
+// 5文字ずつアルファベット順。短い操作だけで a〜y に届き、スペースは目を閉じるだけで入る。
+// 26文字目の z は最も使われないので、目を閉じ続けた時の記号の行に置く。
+
+function letterRow(letters: string): Row {
+  const first = letters[0].toUpperCase();
+  const last = letters[letters.length - 1].toUpperCase();
+  return {
+    id: `en-${letters}`,
+    label: letters.toUpperCase(),
+    speak: `${first} to ${last}`,
+    items: [...letters].map((ch) => c(ch, ch.toUpperCase(), ch.toUpperCase())),
+  };
+}
+
+function symbolRow(id: string, label: string, speak: string, items: [string, string][]): Row {
+  return { id, label, speak, items: items.map(([ch, name]) => c(ch, name)) };
+}
+
+const EN: Record<string, Row> = {
+  ae: letterRow('abcde'),
+  fj: letterRow('fghij'),
+  ko: letterRow('klmno'),
+  pt: letterRow('pqrst'),
+  uy: letterRow('uvwxy'),
+  num1: symbolRow('en-num1', '1-5', 'one to five', [
+    ['1', 'one'],
+    ['2', 'two'],
+    ['3', 'three'],
+    ['4', 'four'],
+    ['5', 'five'],
+  ]),
+  num2: symbolRow('en-num2', '6-0', 'six to zero', [
+    ['6', 'six'],
+    ['7', 'seven'],
+    ['8', 'eight'],
+    ['9', 'nine'],
+    ['0', 'zero'],
+  ]),
+  punct: symbolRow('en-punct', '!-:;"', 'punctuation', [
+    ['!', 'exclamation'],
+    ['-', 'hyphen'],
+    [':', 'colon'],
+    [';', 'semicolon'],
+    ['"', 'quote'],
+  ]),
+  brackets: symbolRow('en-brackets', '()/@&', 'brackets', [
+    ['(', 'open paren'],
+    [')', 'close paren'],
+    ['/', 'slash'],
+    ['@', 'at'],
+    ['&', 'and'],
+  ]),
+  symbols: {
+    id: 'en-symbols',
+    label: ".,?'Z",
+    speak: 'symbols',
+    items: [c('.', 'period'), c(',', 'comma'), c('?', 'question'), c("'", 'apostrophe'), c('z', 'Z', 'Z')],
+  },
+  edit: {
+    id: 'en-edit',
+    label: '編集',
+    speak: 'edit',
+    items: [
+      a('backspace', '⌫Del', 'delete'),
+      a('case', 'Aa', 'case'),
+      a('speak', '🔊Speak', 'speak'),
+      a('undo', '↶Undo', 'undo'),
+      a('clear', 'Clear', 'clear'),
+    ],
+  },
 };
+
+export const EN_KEYMAP: Keymap = {
+  lang: 'en',
+  rowByDir: { UL: EN.ae, U: EN.fj, UR: EN.ko, L: EN.pt, R: EN.uy },
+  longRowByDir: { UL: EN.num1, U: EN.num2, UR: EN.punct, L: EN.brackets, R: EN.edit },
+  closeShort: { kind: 'item', item: c(' ', 'space', '␣') },
+  closeLong: EN.symbols,
+};
+
+export const KEYMAPS: Record<Lang, Keymap> = { ja: JA_KEYMAP, en: EN_KEYMAP };
 
 /** 2段目：方向 → その行の何番目の項目か（中央は -1） */
 export function flowerIndex(dir: Dir): number {
@@ -87,7 +162,7 @@ export function flowerIndex(dir: Dir): number {
 }
 
 export function itemLabel(item: Item): string {
-  return item.kind === 'char' ? item.ch : item.label;
+  return item.kind === 'char' ? (item.label ?? item.ch) : item.label;
 }
 
 export function itemSpeech(item: Item): string {

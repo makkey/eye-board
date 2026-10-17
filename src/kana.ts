@@ -62,6 +62,8 @@ export function applyItem(text: string, item: Item): string {
   switch (item.action) {
     case 'cycle':
       return replaceLast(text, cycle);
+    case 'case':
+      return replaceLast(text, (ch) => (ch === ch.toUpperCase() ? ch.toLowerCase() : ch.toUpperCase()));
     case 'dakuten':
       return replaceLast(text, (ch) => toggle(ch, DAKUTEN));
     case 'handakuten':

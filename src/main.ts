@@ -5,13 +5,14 @@ import { F_BLINK, classify, classifyDefault, loadCalibration, saveCalibration } 
 import type { Calibration, ClassifyResult } from './classifier';
 import { InputEngine } from './engine';
 import { Feedback } from './feedback';
+import { applyEnglish } from './english';
 import { applyItem } from './kana';
-import { LONG_ROW_BY_DIR, ROWS, ROW_BY_DIR, flowerIndex, itemLabel, itemSpeech } from './layout';
+import { KEYMAPS, flowerIndex, itemLabel, itemSpeech } from './layout';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './settings';
 import { Tracker } from './tracker';
 import type { TrackerFrame } from './tracker';
 import { ALL_CLASSES, ALL_DIRS, DIR_ARROW, DIR_NAME_JA } from './types';
-import type { Dir, GazeClass, Item, Row, Settings } from './types';
+import type { Dir, GazeClass, Item, Lang, Row, Settings, SideDir } from './types';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -34,6 +35,13 @@ const trail: number[][] = [];
 const feedback = new Feedback(settings);
 const tracker = new Tracker($<HTMLVideoElement>('video'));
 tracker.smoothing = settings.smoothing;
+
+/** 読み上げる定型の言葉（入力中の言語で読む） */
+const PHRASES: Record<Lang, { cancel: string; back: string; empty: string; name: string }> = {
+  ja: { cancel: 'キャンセル', back: 'もどる', empty: '何も入力されていません', name: '日本語' },
+  en: { cancel: 'cancel', back: 'back', empty: 'nothing typed', name: 'English' },
+};
+const phrase = () => PHRASES[settings.lang];
 
 const engine = new InputEngine(settings, {
   rowCandidate(row, long) {
@@ -62,10 +70,14 @@ const engine = new InputEngine(settings, {
   cancel(reason) {
     spokenItem = spokenRow = null;
     feedback.play('cancel');
-    void feedback.say(reason === 'idle' ? 'キャンセル' : 'もどる');
+    void feedback.say(reason === 'idle' ? phrase().cancel : phrase().back);
     renderKeyboard();
   },
-});
+  retract() {
+    // 目を閉じて入れたスペースを、閉じ続けて記号に切り替えたので取り消す
+    undo();
+  },
+}, KEYMAPS[settings.lang]);
 
 // ---- テキスト ----
 const textEl = $<HTMLTextAreaElement>('text');
@@ -81,14 +93,14 @@ function setText(next: string) {
 
 function applyToText(item: Item) {
   if (item.kind === 'action' && item.action === 'speak') {
-    void feedback.say(text || '何も入力されていません', true);
+    void feedback.say(text || phrase().empty, true);
     return;
   }
   if (item.kind === 'action' && item.action === 'undo') {
     undo();
     return;
   }
-  setText(applyItem(text, item));
+  setText(settings.lang === 'en' ? applyEnglish(text, item) : applyItem(text, item));
 }
 
 function undo() {
@@ -97,7 +109,7 @@ function undo() {
   textEl.value = text;
 }
 
-$('btn-speak').onclick = () => void feedback.say(text || '何も入力されていません', true);
+$('btn-speak').onclick = () => void feedback.say(text || phrase().empty, true);
 $('btn-copy').onclick = () => void navigator.clipboard?.writeText(text);
 $('btn-undo').onclick = undo;
 $('btn-clear').onclick = () => setText('');
@@ -108,7 +120,9 @@ const keyboardEl = $('keyboard');
 /** 画面上の並び（上段：↖ ↑ ↗、下段：← 中央 →） */
 const DIR_GRID: Dir[] = ['UL', 'U', 'UR', 'L', 'C', 'R'];
 
+/** キーの下に小さく出す残りの文字（「あ」→「いうえお」）。ラベルが複数文字なら出さない（「ABCDE」など） */
 function rowSub(row: Row): string {
+  if ([...row.label].length > 1) return '';
   return row.items
     .slice(1)
     .filter((x): x is Item => !!x)
@@ -119,16 +133,24 @@ function rowSub(row: Row): string {
 let renderedStage = '';
 
 function renderKeyboard() {
-  const key = engine.stage === 'row' ? 'row' : `char:${engine.row?.id}`;
+  const key = `${engine.keymap.lang}:` + (engine.stage === 'row' ? 'row' : `char:${engine.row?.id}`);
   if (key === renderedStage) return;
   renderedStage = key;
   keyboardEl.innerHTML = '';
   keyboardEl.className = `keyboard stage-${engine.stage}`;
 
   if (engine.stage === 'row') {
+    const km = engine.keymap;
     for (const dir of DIR_GRID) {
-      const hint = dir === 'C' ? '目を閉じる／下' : DIR_ARROW[dir];
-      keyboardEl.append(keyEl(dir, ROWS[ROW_BY_DIR[dir]], ROWS[LONG_ROW_BY_DIR[dir]], hint));
+      if (dir === 'C') {
+        const cs = km.closeShort;
+        const label = cs.kind === 'row' ? cs.row.label : itemLabel(cs.item);
+        const sub = cs.kind === 'row' ? rowSub(cs.row) : closeShortName();
+        keyboardEl.append(keyEl(dir, label, sub, km.closeLong.label, '目を閉じる／下'));
+      } else {
+        const row = km.rowByDir[dir];
+        keyboardEl.append(keyEl(dir, row.label, rowSub(row), km.longRowByDir[dir].label, DIR_ARROW[dir]));
+      }
     }
     return;
   }
@@ -158,13 +180,21 @@ function renderKeyboard() {
   keyboardEl.append(back);
 }
 
-function keyEl(dir: Dir, row: Row, longRow: Row, hint: string) {
+function keyEl(dir: Dir, label: string, sub: string, longLabel: string, hint: string) {
   const el = document.createElement('div');
   el.className = 'key';
   el.id = `key-${dir}`;
-  el.innerHTML = `<span class="hint">${hint}</span><span class="main">${row.label}</span>
-    <span class="sub">${rowSub(row)}</span><span class="long">2秒: ${longRow.label}</span>`;
+  // 「ABCDE」のような長いラベルは小さめに
+  const cls = [...label].length > 2 ? 'main small' : 'main';
+  el.innerHTML = `<span class="hint">${hint}</span><span class="${cls}">${label}</span>
+    <span class="sub">${sub}</span><span class="long">2秒: ${longLabel}</span>`;
   return el;
+}
+
+/** 1段目で目を閉じた時に入るものの名前（な行／スペース） */
+function closeShortName(): string {
+  const cs = engine.keymap.closeShort;
+  return cs.kind === 'row' ? cs.row.speak : 'スペース';
 }
 
 // ---- 視線インジケータ ----
@@ -212,8 +242,8 @@ function updateView(t: number) {
   let marker: number | null = null;
   if (engine.closedStart !== null) {
     const dur = t - engine.closedStart;
-    if (engine.stage === 'row' || engine.row?.id === ROW_BY_DIR.C) {
-      // 1段目：0.6秒で な行、2秒で 記号
+    if (engine.stage === 'row' || engine.closeCanSwitch) {
+      // 1段目：0.6秒で な行（スペース）、2秒で 記号
       fill = dur / settings.longMs;
       marker = settings.closeMinMs / settings.longMs;
     } else {
@@ -242,17 +272,19 @@ function updateView(t: number) {
     sub = 'カメラに顔が正面から映るようにしてください';
   } else if (engine.closedStart !== null) {
     main = '目を閉じています';
-    if (!engine.closeDone) sub = `そのまま閉じていると${engine.stage === 'row' ? ' な行' : '、もどる'}`;
-    else if (engine.stage === 'row') sub = 'もどりました。目を開けてください';
-    else if (engine.row?.id === ROW_BY_DIR.C) sub = 'な行。そのまま閉じていると 記号';
-    else sub = `${engine.row!.speak}。目を開けてください`;
+    const longName = engine.keymap.closeLong.label;
+    if (!engine.closeDone) sub = `そのまま閉じていると${engine.stage === 'row' ? ` ${closeShortName()}` : '、もどる'}`;
+    else if (engine.closeAction === 'back') sub = 'もどりました。目を開けてください';
+    else if (engine.closeCanSwitch) sub = `${closeShortName()}。そのまま閉じていると ${longName}`;
+    else sub = `${engine.row?.label ?? ''}。目を開けてください`;
   } else if (engine.stage === 'row') {
     if (cand?.kind === 'row') {
       main = `${cand.row.label}`;
-      sub = '画面に視線を戻すと確定' + (cand.long ? '' : `（見続けると ${ROWS[LONG_ROW_BY_DIR[engine.dir]].label}）`);
+      const longRow = engine.keymap.longRowByDir[engine.dir as SideDir];
+      sub = '画面に視線を戻すと確定' + (cand.long ? '' : `（見続けると ${longRow.label}）`);
     } else {
       main = '行を選ぶ';
-      sub = '方向を見る → 戻る　／　目を閉じる（下を見る）→ な行';
+      sub = `方向を見る → 戻る　／　目を閉じる（下を見る）→ ${closeShortName()}`;
     }
   } else {
     const row = engine.row!;
@@ -386,6 +418,24 @@ $('btn-start-sim').onclick = () => {
   $('start').hidden = true;
   setMode('sim');
 };
+
+// ---- 言語 ----
+function showLang() {
+  $('btn-lang').textContent = `言語: ${PHRASES[settings.lang].name}`;
+}
+
+$('btn-lang').onclick = (e) => {
+  // キーボード操作（Space など）でボタンが押されないよう、フォーカスを外す
+  (e.currentTarget as HTMLElement).blur();
+  settings.lang = settings.lang === 'ja' ? 'en' : 'ja';
+  saveSettings(settings);
+  engine.setKeymap(KEYMAPS[settings.lang], performance.now());
+  renderKeyboard();
+  showLang();
+  feedback.unlock();
+  void feedback.say(phrase().name);
+};
+showLang();
 
 // ---- キャリブレーション ----
 const calibEl = $('calib');
