@@ -20,7 +20,7 @@
           例：「昨日は 楽しかったね ありがとう」→「いおうあ あおいあっあえ あいあおう」。
         </p>
         <p class="note">
-          API キーはこのブラウザの中だけに保存され、選んだ会社（Anthropic / Google / OpenAI / SB Intuitions）の API に直接送られます。
+          API キーはこのブラウザの中だけに保存され、選んだ会社（Anthropic / Google / OpenAI）の API に直接送られます。
           実行すると API の利用料金がかかります。
         </p>
       </section>
@@ -40,18 +40,7 @@
           <select id="model"></select>
           <input id="model-custom" placeholder="一覧にないモデル名を直接入力" />
         </div>
-        <div class="field" id="relay-field" hidden>
-          <label class="field">中継サーバー
-            <input id="relay" placeholder="http://127.0.0.1:8787" spellcheck="false" />
-          </label>
-          <p class="note">
-            Sarashina の API はブラウザから直接は呼べない（サーバー側から呼ぶ前提の）ため、手元の PC で小さな中継を動かして、その中継経由で送ります。
-            <a href="https://github.com/makkey/eye-board/blob/main/tools/cors-proxy.mjs" target="_blank" rel="noopener">cors-proxy.mjs</a> をダウンロードし、
-            Node.js（18 以上）が入った PC のターミナルで <code>node cors-proxy.mjs</code> を実行してください。
-            API キーはこのブラウザ → 手元の中継 → Sarashina と渡るだけで、中継は保存も表示もしません。
-          </p>
-        </div>
-        <label class="field" id="effort-field">考える深さ（Claude の effort ／ Gemini 3 の thinkingLevel ／ ChatGPT の reasoning_effort。浅いほど速い）
+        <label class="field">考える深さ（Claude の effort ／ Gemini 3 の thinkingLevel ／ ChatGPT の reasoning_effort。浅いほど速い）
           <select id="effort">
             <option value="default">モデルの既定</option>
             <option value="minimal">minimal（最も速い。対応しているモデルのみ。Claude では low）</option>

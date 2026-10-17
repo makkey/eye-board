@@ -3,7 +3,7 @@ import './lab.css';
 import { DEFAULT_SENTENCES, parseSentences } from './dataset';
 import { PROMPTS, TOP_N, judge, mergeRuns, segmentPrompt, sentencePrompt } from './decode';
 import type { Candidate, PromptId, PromptVersion } from './decode';
-import { PROVIDERS, setSarashinaRelay } from './providers';
+import { PROVIDERS } from './providers';
 import type { Effort, ProviderId } from './providers';
 import { toVowels } from './vowels';
 import type { VowelStyle } from './vowels';
@@ -30,7 +30,9 @@ const store = {
 };
 
 // ---- モデルの選択 ----
-let providerId = (store.get('provider') as ProviderId) || 'claude';
+const savedProvider = store.get('provider');
+// 以前あった会社（削除済み）が保存されていたら Claude にもどす
+let providerId: ProviderId = savedProvider && savedProvider in PROVIDERS ? (savedProvider as ProviderId) : 'claude';
 const keyInput = $<HTMLInputElement>('api-key');
 const modelSelect = $<HTMLSelectElement>('model');
 const modelCustom = $<HTMLInputElement>('model-custom');
@@ -57,8 +59,6 @@ function loadProvider() {
   const p = PROVIDERS[providerId];
   keyInput.value = store.get(`key.${providerId}`) ?? '';
   $('key-help').textContent = `（${p.keyHelp}）`;
-  $('effort-field').hidden = providerId === 'sarashina';
-  $('relay-field').hidden = providerId !== 'sarashina';
   const models = JSON.parse(store.get(`models.${providerId}`) ?? '[]') as string[];
   fillModels(models, store.get(`model.${providerId}`));
 }
@@ -79,14 +79,6 @@ function fillModels(models: string[], selected: string | null) {
   }
   modelSelect.value = selected && models.includes(selected) ? selected : PROVIDERS[providerId].pickDefault(models);
 }
-
-const relayInput = $<HTMLInputElement>('relay');
-relayInput.value = store.get('relay.sarashina') ?? '';
-setSarashinaRelay(relayInput.value);
-relayInput.onchange = () => {
-  store.set('relay.sarashina', relayInput.value.trim() || null);
-  setSarashinaRelay(relayInput.value);
-};
 
 keyInput.onchange = () => {
   if ($<HTMLInputElement>('save-key').checked) store.set(`key.${providerId}`, keyInput.value.trim());
@@ -504,7 +496,7 @@ function summarize(t: Target, mode: string, rs: TaskResult[]): Summary {
     const top5 = ok.filter((r) => r.single?.some((c) => c.correct)).length / n1;
     modeLabel += `（1回分だけなら 1位 ${pctOf(top1)}・5位以内 ${pctOf(top5)}）`;
   }
-  const effortLabel = t.provider !== 'sarashina' && t.effort !== 'default' ? ` / 深さ ${t.effort}` : '';
+  const effortLabel = t.effort !== 'default' ? ` / 深さ ${t.effort}` : '';
   // 割合はエラーにならなかった問いの中で数える（混雑や回数制限で精度が低く見えないように）
   const n = ok.length || 1;
   return {

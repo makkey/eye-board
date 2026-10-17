@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { JsonSchema } from './decode';
 
-export type ProviderId = 'claude' | 'gemini' | 'openai' | 'sarashina';
+export type ProviderId = 'claude' | 'gemini' | 'openai';
 export type Effort = 'default' | 'minimal' | 'low' | 'medium' | 'high';
 
 /** モデルの返答と、使ったトークン数（料金の見積もり用。分からなければ 0） */
@@ -187,78 +187,6 @@ const openai: Provider = {
   },
 };
 
-// ---- Sarashina（SB Intuitions。OpenAI 互換の形式。書かれていない引数を送ると 400 になる）----
-
-/** ブラウザから直接は呼べない（CORS）ので、手元で動かす中継（tools/cors-proxy.mjs）を通す */
-let sarashinaBase = 'http://127.0.0.1:8787';
-export function setSarashinaRelay(url: string) {
-  sarashinaBase = url.trim().replace(/\/+$/, '') || 'http://127.0.0.1:8787';
-}
-const SARASHINA = () => `${sarashinaBase}/v1`;
-/** 一覧の API が使えない時に出すモデル */
-const SARASHINA_MODELS = ['sarashina3-mini', 'sarashina3-nano'];
-/** json_schema の出力指定が通らなかったモデル（以後は指示文で JSON を頼む） */
-const noSchema = new Set<string>();
-
-const sarashina: Provider = {
-  id: 'sarashina',
-  label: 'Sarashina',
-  keyHelp: 'https://sarashina.ai/ に Google アカウントでログインして作成。無料ベータは1分あたりの回数制限が厳しいので「同時に送る数」は1に。下の中継が必要',
-  async listModels(key) {
-    try {
-      const res = await fetchJson(`${SARASHINA()}/models`, { headers: { authorization: `Bearer ${key}` } });
-      const ids = (res.data ?? []).map((m: { id: string }) => m.id).filter((id: string) => /sarashina/.test(id) && !/embed|rerank|guard|translate/.test(id));
-      return ids.length ? ids : SARASHINA_MODELS;
-    } catch {
-      return SARASHINA_MODELS;
-    }
-  },
-  pickDefault(models) {
-    return models.find((m) => m.includes('mini')) ?? models[0];
-  },
-  async generate(key, model, system, schema, user) {
-    const call = (structured: boolean) =>
-      sarashinaRateLimit(() =>
-        fetchJson(`${SARASHINA()}/chat/completions`, {
-          method: 'POST',
-          headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-          body: JSON.stringify({
-            model,
-            // max_tokens は受け付けず、max_completion_tokens（1〜8000）を使う
-            max_completion_tokens: 2000,
-            messages: [
-              { role: 'system', content: system },
-              { role: 'user', content: structured ? user : `${user}\n\n${jsonInstruction(schema)}` },
-            ],
-            ...(structured ? { response_format: { type: 'json_schema', json_schema: { name: 'candidates', strict: true, schema } } } : {}),
-          }),
-        }),
-      );
-    let res;
-    try {
-      res = await callWithFallback();
-    } catch (e) {
-      if (/接続できませんでした/.test((e as Error).message)) {
-        throw new Error(`中継（${sarashinaBase}）に接続できませんでした。手元の PC で中継を起動しているか確認してください`);
-      }
-      throw e;
-    }
-    return chatReply(res);
-
-    /** json_schema の出力指定が 400 になったモデルは、以後は指示文で JSON を頼む */
-    async function callWithFallback() {
-      if (noSchema.has(model)) return call(false);
-      try {
-        return await call(true);
-      } catch (e) {
-        if (!/HTTP 400/.test((e as Error).message)) throw e;
-        noSchema.add(model);
-        return call(false);
-      }
-    }
-  },
-};
-
 /** OpenAI 形式（chat/completions）の返答から本文とトークン数を取り出す（completion_tokens は考えた分を含む） */
 function chatReply(res: { choices?: { message?: { content?: string } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } }): Reply {
   return {
@@ -266,25 +194,6 @@ function chatReply(res: { choices?: { message?: { content?: string } }[]; usage?
     inputTokens: res.usage?.prompt_tokens ?? 0,
     outputTokens: res.usage?.completion_tokens ?? 0,
   };
-}
-
-/** 出力形式を指定できない時に、指示文で JSON の形を伝える */
-function jsonInstruction(schema: JsonSchema): string {
-  const fields = schema.properties.candidates.items.required.map((f) => `"${f}": "..."`).join(', ');
-  return `次の形の JSON だけを返してください（説明やコードブロックは不要）：{"candidates": [{${fields}}]}`;
-}
-
-/** 1分あたりの回数制限（429）なら、Retry-After の秒数（なければ12秒）待ってやり直す */
-async function sarashinaRateLimit<T>(f: () => Promise<T>): Promise<T> {
-  for (let i = 0; ; i++) {
-    try {
-      return await f();
-    } catch (e) {
-      if (i >= 5 || !/HTTP 429/.test((e as Error).message)) throw e;
-      const sec = (e as HttpError).retryAfter ?? 12;
-      await new Promise((r) => setTimeout(r, Math.min(60, Math.max(1, sec)) * 1000));
-    }
-  }
 }
 
 /**
@@ -317,13 +226,7 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
   claude: withRetry(claude),
   gemini: withRetry(gemini),
   openai: withRetry(openai),
-  sarashina: withRetry(sarashina),
 };
-
-interface HttpError extends Error {
-  /** Retry-After ヘッダーの秒数 */
-  retryAfter?: number;
-}
 
 async function fetchJson(url: string, init: RequestInit) {
   let res: Response;
@@ -342,10 +245,7 @@ async function fetchJson(url: string, init: RequestInit) {
     } catch {
       // JSON でなければ本文をそのまま
     }
-    const err: HttpError = new Error(`HTTP ${res.status}: ${String(message).split('\n')[0].slice(0, 200)}`);
-    const retryAfter = Number(res.headers.get('retry-after'));
-    if (retryAfter > 0) err.retryAfter = retryAfter;
-    throw err;
+    throw new Error(`HTTP ${res.status}: ${String(message).split('\n')[0].slice(0, 200)}`);
   }
   return JSON.parse(body);
 }
