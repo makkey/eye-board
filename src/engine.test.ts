@@ -442,3 +442,29 @@ describe('InputEngine（2段目の長押し）', () => {
     expect(log).toEqual(['明日には言います', '一部を使う']);
   });
 });
+
+describe('InputEngine（holdClose）', () => {
+  it('閉じる操作の後に holdClose すると、閉じ続けても記号に切り替わらない', () => {
+    const log: string[] = [];
+    const engine = new InputEngine(
+      SETTINGS,
+      {
+        commit: (i) => {
+          log.push(itemLabel(i));
+          engine.holdClose();
+        },
+        retract: (i) => log.push(`retract:${itemLabel(i)}`),
+      },
+      VOWEL_KEYMAP,
+    );
+    let t = 0;
+    const feed = (what: Dir | 'closed', ms: number) => {
+      for (let i = 0; i < ms; i += 10, t += 10) engine.update({ t, faceFound: true, dir: what === 'closed' ? 'C' : what, closed: what === 'closed' });
+    };
+    feed('C', 300);
+    feed('closed', 3000);
+    feed('C', 300);
+    expect(log).toEqual(['変換']);
+    expect(engine.stage).toBe('row');
+  });
+});

@@ -174,6 +174,8 @@ const JA = {
   'jv.noCandidatesDetail': '候補なし：AI の候補 {n} 件は、どれも母音・最初の音・選んだ文節のどれかが合いませんでした。例：{ex}',
   'jv.error': '変換できませんでした（{msg}）',
   'jv.convertFirst': '先に変換してください',
+  'jv.sepEmpty': '区切りは、文節を入れたあとに使えます',
+  'jv.sepTwice': 'もう区切ってあります',
   'jv.cancelled': '変換をやめました',
   'jv.backToInput': '入力にもどる',
 };
@@ -344,6 +346,8 @@ const EN: Record<TextKey, string> = {
   'jv.noCandidatesDetail': 'No candidates: none of the AI’s {n} candidates matched the vowels, first sound and kept phrases. e.g. {ex}',
   'jv.error': 'Could not convert ({msg})',
   'jv.convertFirst': 'Convert first',
+  'jv.sepEmpty': 'A phrase break comes after a phrase',
+  'jv.sepTwice': 'Already broken here',
   'jv.cancelled': 'Conversion stopped',
   'jv.backToInput': 'Back to input',
 };

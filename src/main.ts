@@ -129,8 +129,9 @@ const engine = new InputEngine(settings, {
     // 候補の選択などは、それで始まる変換より先に記録する。文字の入力は、入力中の拍に反映した後で記録する
     const head = engine.keymap.id === HEAD_KEYMAP.id;
     const logged = logSelection(item);
+    rejectedItem = null;
     applyToText(item);
-    if (!logged) logInput(item, head);
+    if (!logged && rejectedItem !== item) logInput(item, head);
     renderKeyboard();
   },
   cancel(reason) {
@@ -155,7 +156,9 @@ const engine = new InputEngine(settings, {
     renderKeyboard();
   },
   retract(item) {
-    inputLog.add('取り消し', `${itemLabel(item)}（閉じ続けた）`);
+    // 何も入れずに目を閉じ続けた（変換は始まっていない）時は記録しない
+    const noop = item.kind === 'action' && item.action === 'convert' && conv === 'idle';
+    if (!noop) inputLog.add('取り消し', `${itemLabel(item)}（閉じ続けた）`);
     if (item.kind === 'action' && item.action === 'more') {
       // 「別の候補」を頼んだが、閉じ続けたので入力にもどる（この後 cancel が来る）
       conv = 'choosing';
@@ -266,7 +269,8 @@ function applyVowelItem(item: Item) {
     else if (item.ch === ' ') {
       // 文節の区切り。入力中の文節があって、まだ区切っていない時だけ
       if (pending.length && pending[pending.length - 1] !== ' ') editPending([...pending, ' ']);
-    } else if (pending.length) say(t('jv.convertFirst'));
+      else reject(item, t(pending.length ? 'jv.sepTwice' : 'jv.sepEmpty'));
+    } else if (pending.length) reject(item, t('jv.convertFirst'));
     else setText(text + item.ch);
     syncKeymap();
     return;
@@ -308,10 +312,18 @@ function applyVowelItem(item: Item) {
       undo();
       break;
     default:
-      if (pending.length) say(t('jv.convertFirst'));
+      if (pending.length) reject(item, t('jv.convertFirst'));
       else setText(applyItem(text, item));
   }
   syncKeymap();
+}
+
+/** 今は受け付けられない入力：案内して、入力ログにも「入力できず」と残す */
+let rejectedItem: Item | null = null;
+function reject(item: Item, msg: string) {
+  rejectedItem = item;
+  inputLog.add('入力できず', `${itemLabel(item)}（${msg}）`);
+  say(msg);
 }
 
 /** 利用者が拍を入れ直した：固定していた文節は合わなくなるので捨てる */
@@ -383,6 +395,8 @@ async function startConversion(more: boolean) {
   conv = 'waiting';
   notice = null;
   if (!more) shown = [];
+  // 変換が始まった：目を閉じたまま待っても記号に切り替えない（記号は入力中の拍が無い時だけ）
+  if (!more) engine.holdClose();
   engine.openRow({ ...WAIT_ROW, label: t('jv.waiting') }, performance.now());
   renderKeyboard();
   const model = settings.aiModel.trim() || DEFAULT_MODELS[settings.aiProvider];
