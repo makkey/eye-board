@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { JsonSchema } from './decode';
 
 export type ProviderId = 'claude' | 'gemini' | 'openai' | 'sarashina';
-export type Effort = 'default' | 'low' | 'medium' | 'high';
+export type Effort = 'default' | 'minimal' | 'low' | 'medium' | 'high';
 
 export interface Provider {
   id: ProviderId;
@@ -44,7 +44,8 @@ const claude: Provider = {
       messages: [{ role: 'user', content: user }],
       output_config: {
         format: { type: 'json_schema', schema },
-        ...(effort === 'default' ? {} : { effort }),
+        // Claude には minimal がないので low として送る
+        ...(effort === 'default' ? {} : { effort: effort === 'minimal' ? 'low' : effort }),
       },
       ...(fallback ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
     });
