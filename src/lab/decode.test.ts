@@ -97,6 +97,15 @@ describe('PROMPTS', () => {
     expect(PROMPTS.v2.system('fold')).toContain('うええ');
   });
 
+  it('規則の中の例（かな→母音）も規則どおり', () => {
+    for (const style of ['mark', 'fold'] as const) {
+      const text = PROMPTS.v1.system(style);
+      const pairs = [...text.matchAll(/([ぁ-んー]+)→([あいうえおんっー]+)/g)];
+      expect(pairs.length).toBeGreaterThan(0);
+      for (const [, kana, vowels] of pairs) expect(toVowels(kana, style), kana).toBe(vowels);
+    }
+  });
+
   it('スキーマの必須項目がプロパティと一致する', () => {
     for (const p of Object.values(PROMPTS)) {
       const item = p.schema.properties.candidates.items;
