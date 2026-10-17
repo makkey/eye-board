@@ -1,39 +1,35 @@
-/** 視線の方向。C = 中央（正面＝画面を見ている状態） */
-export type Dir = 'C' | 'U' | 'UR' | 'R' | 'DR' | 'D' | 'DL' | 'L' | 'UL';
+/**
+ * 視線の方向。C = 中央（正面＝画面を見ている状態）。
+ * 下方向は、カメラから見ると「目を閉じた」のとほぼ同じになり区別できないので、方向としては使わず
+ * 「閉じる」と同じ1つの操作として扱う。
+ */
+export type Dir = 'C' | 'UL' | 'U' | 'UR' | 'L' | 'R';
 
-export const ALL_DIRS: Dir[] = ['C', 'U', 'UR', 'R', 'DR', 'D', 'DL', 'L', 'UL'];
+export const ALL_DIRS: Dir[] = ['C', 'UL', 'U', 'UR', 'L', 'R'];
 
-/** 分類器が区別するクラス：9方向＋目を閉じている */
+/** 分類器が区別するクラス：6方向＋目を閉じている（下を見ている） */
 export type GazeClass = Dir | 'closed';
 export const ALL_CLASSES: GazeClass[] = [...ALL_DIRS, 'closed'];
 
 /** 2段目（フラワー配置）：左から時計回りに あ・い・う・え・お */
 export const FLOWER_DIRS: Dir[] = ['L', 'UL', 'U', 'UR', 'R'];
-/** 2段目でこの方向を見ると、何も選ばずに1段目へ戻る */
-export const BACK_DIRS: Dir[] = ['DL', 'D', 'DR'];
 
 export const DIR_ARROW: Record<Dir, string> = {
   C: '●',
+  UL: '↖',
   U: '↑',
   UR: '↗',
-  R: '→',
-  DR: '↘',
-  D: '↓',
-  DL: '↙',
   L: '←',
-  UL: '↖',
+  R: '→',
 };
 
 export const DIR_NAME_JA: Record<Dir, string> = {
   C: '中央',
+  UL: '左上',
   U: '上',
   UR: '右上',
-  R: '右',
-  DR: '右下',
-  D: '下',
-  DL: '左下',
   L: '左',
-  UL: '左上',
+  R: '右',
 };
 
 export type Action =
@@ -66,7 +62,7 @@ export interface Row {
 export interface GazeFrame {
   t: number;
   faceFound: boolean;
-  /** 分類済みの方向（目を閉じている間は無視される） */
+  /** 分類済みの方向（目を閉じている／下を見ている間は無視される） */
   dir: Dir;
   closed: boolean;
 }

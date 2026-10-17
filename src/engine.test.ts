@@ -54,6 +54,19 @@ describe('InputEngine', () => {
     expect(got).toEqual(['か', 'き', 'く', 'け', 'こ']);
   });
 
+  it('1段目は ↖あ ↑か ↗さ ←た →は、2秒で ↖ま ↑や ↗ら ←わ →編集', () => {
+    const first = (d: Dir, ms: number) =>
+      run([
+        ['C', 300],
+        [d, ms],
+        ['C', 300],
+        ['L', 600],
+        ['C', 300],
+      ]).log[0];
+    expect((['UL', 'U', 'UR', 'L', 'R'] as Dir[]).map((d) => first(d, 600))).toEqual(['あ', 'か', 'さ', 'た', 'は']);
+    expect((['UL', 'U', 'UR', 'L', 'R'] as Dir[]).map((d) => first(d, 2300))).toEqual(['ま', 'や', 'ら', 'わ', '⌫削除']);
+  });
+
   it('選択時間に満たない視線移動は無視', () => {
     const { log, engine } = run([
       ['C', 300],
@@ -79,17 +92,29 @@ describe('InputEngine', () => {
   it('目を閉じ続けた時点で な行（開けるのが遅くてもよい）', () => {
     const { rows, engine } = run([
       ['C', 300],
-      ['closed', 2500],
+      ['closed', 1500],
     ]);
     expect(rows).toEqual(['na']);
     expect(engine.stage).toBe('char');
     expect(engine.row?.id).toBe('na');
   });
 
+  it('そのまま2秒閉じ続けると「記号」に切り替わる', () => {
+    const { rows, log } = run([
+      ['C', 300],
+      ['closed', 2500],
+      ['C', 300],
+      ['UR', 600],
+      ['C', 300],
+    ]);
+    expect(rows).toEqual(['na', 'kigo']);
+    expect(log).toEqual(['？']);
+  });
+
   it('な行に入った後も閉じ続けていて、2段目の「戻る」にはならない', () => {
     const { rows, log, engine } = run([
       ['C', 300],
-      ['closed', 2500],
+      ['closed', 1500],
       ['C', 300],
       ['UL', 600],
       ['C', 300],
@@ -99,22 +124,22 @@ describe('InputEngine', () => {
     expect(engine.stage).toBe('row');
   });
 
-  it('閉じ始めのまぶたが一瞬「左下」と判定されても、閉じ続ければ な行', () => {
+  it('閉じ始めに一瞬別の方向と判定されても、閉じ続ければ な行', () => {
     const { rows } = run([
       ['C', 300],
-      ['DL', 150],
+      ['L', 150],
       ['closed', 900],
       ['C', 300],
     ]);
     expect(rows).toEqual(['na']);
   });
 
-  it('閉じている途中に薄目で一瞬開いても途切れず、ま行にもならない', () => {
+  it('閉じている途中に薄目で一瞬開いても途切れない', () => {
     const { rows } = run([
       ['C', 300],
-      ['DL', 150],
+      ['L', 150],
       ['closed', 400],
-      ['DL', 50],
+      ['L', 50],
       ['closed', 400],
       ['C', 300],
     ]);
@@ -124,9 +149,9 @@ describe('InputEngine', () => {
   it('目を閉じている時間は、方向を見ている時間に数えない', () => {
     const { rows, engine } = run([
       ['C', 300],
-      ['DL', 250],
+      ['L', 250],
       ['closed', 400],
-      ['DL', 150],
+      ['L', 150],
       ['C', 300],
     ]);
     expect(rows).toEqual([]);
@@ -143,21 +168,7 @@ describe('InputEngine', () => {
     expect(engine.stage).toBe('row');
   });
 
-  it('2段目で下を見て戻ると、何も選ばず1段目へ', () => {
-    for (const d of ['DL', 'D', 'DR'] as Dir[]) {
-      const { log, engine } = run([
-        ['C', 300],
-        ['U', 600],
-        ['C', 300],
-        [d, 600],
-        ['C', 300],
-      ]);
-      expect(log).toEqual(['cancel:back']);
-      expect(engine.stage).toBe('row');
-    }
-  });
-
-  it('2段目で目を閉じると、何も選ばず1段目へ', () => {
+  it('2段目で目を閉じる（下を見る）と、何も選ばず1段目へ', () => {
     const { log, engine } = run([
       ['C', 300],
       ['U', 600],
@@ -167,50 +178,6 @@ describe('InputEngine', () => {
     ]);
     expect(log).toEqual(['cancel:close']);
     expect(engine.stage).toBe('row');
-  });
-
-  it('下を2秒見続けると「わ行」', () => {
-    const { log } = run([
-      ['C', 300],
-      ['D', 2300],
-      ['C', 300],
-      ['U', 600],
-      ['C', 300],
-    ]);
-    expect(log).toEqual(['ん']);
-  });
-
-  it('下を短く見ると「や行」', () => {
-    const { log } = run([
-      ['C', 300],
-      ['D', 800],
-      ['C', 300],
-      ['R', 600],
-      ['C', 300],
-    ]);
-    expect(log).toEqual(['よ']);
-  });
-
-  it('左下2秒 → 上 で濁点', () => {
-    const { log } = run([
-      ['C', 300],
-      ['DL', 2300],
-      ['C', 300],
-      ['U', 600],
-      ['C', 300],
-    ]);
-    expect(log).toEqual(['゛']);
-  });
-
-  it('上2秒 → 左 で削除', () => {
-    const { log } = run([
-      ['C', 300],
-      ['U', 2300],
-      ['C', 300],
-      ['L', 600],
-      ['C', 300],
-    ]);
-    expect(log).toEqual(['⌫削除']);
   });
 
   it('2段目で何もしないとタイムアウトでキャンセル', () => {

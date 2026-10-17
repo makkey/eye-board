@@ -35,23 +35,17 @@ export const ROWS: Record<string, Row> = {
     speak: 'わ行',
     items: [c('わ'), c('を'), c('ん'), c('ー', 'のばしぼう'), null],
   },
-  mod: {
-    id: 'mod',
-    label: '゛゜小',
-    speak: '濁点',
+  kigo: {
+    id: 'kigo',
+    label: '記号',
+    speak: '記号',
     items: [
-      a('cycle', '゛゜小', '切り替え'),
-      a('small', '小', '小文字'),
-      a('dakuten', '゛', '濁点'),
-      a('handakuten', '゜', '半濁点'),
-      null,
+      c('、', 'てん'),
+      c('。', 'まる'),
+      a('cycle', '゛゜小', '濁点'),
+      c('？', 'はてな'),
+      c('！', 'びっくり'),
     ],
-  },
-  punct: {
-    id: 'punct',
-    label: '、。?!',
-    speak: '句読点',
-    items: [c('、', 'てん'), c('。', 'まる'), c('？', 'はてな'), c('！', 'びっくり'), null],
   },
   edit: {
     id: 'edit',
@@ -67,7 +61,7 @@ export const ROWS: Record<string, Row> = {
   },
 };
 
-/** 1段目：視線方向 → 行（中央は「目を閉じる」で選ぶ） */
+/** 1段目：視線方向 → 行（中央は「目を閉じる／下を見る」） */
 export const ROW_BY_DIR: Record<Dir, string> = {
   UL: 'a',
   U: 'ka',
@@ -75,20 +69,19 @@ export const ROW_BY_DIR: Record<Dir, string> = {
   L: 'ta',
   C: 'na',
   R: 'ha',
-  DL: 'ma',
-  D: 'ya',
-  DR: 'ra',
 };
 
-/** 1段目：長く見続けた時に切り替わる行 */
-export const LONG_ROW_BY_DIR: Partial<Record<Dir, string>> = {
-  U: 'edit',
-  DL: 'mod',
-  D: 'wa',
-  DR: 'punct',
+/** 1段目：longMs 見続けた時（中央は目を閉じ続けた時）に切り替わる行 */
+export const LONG_ROW_BY_DIR: Record<Dir, string> = {
+  UL: 'ma',
+  U: 'ya',
+  UR: 'ra',
+  L: 'wa',
+  C: 'kigo',
+  R: 'edit',
 };
 
-/** 2段目：方向 → その行の何番目の項目か（フラワー配置以外は -1） */
+/** 2段目：方向 → その行の何番目の項目か（中央は -1） */
 export function flowerIndex(dir: Dir): number {
   return FLOWER_DIRS.indexOf(dir);
 }

@@ -5,10 +5,10 @@ import type { TrackerFrame } from './tracker';
 import { ALL_CLASSES, DIR_NAME_JA } from './types';
 import type { GazeClass } from './types';
 
-export type CalStep = GazeClass;
+/** 'down' は「下を見る」。カメラからは目を閉じたのと区別できないので、'closed' として記録する */
+export type CalStep = GazeClass | 'down';
 
-// 「下を見る」と「目を閉じる」は紛れやすいので、最後にもう一度ずつ記録する
-const STEPS: CalStep[] = ['C', 'U', 'UR', 'R', 'DR', 'D', 'DL', 'L', 'UL', 'C', 'closed', 'D', 'closed'];
+const STEPS: CalStep[] = ['C', 'U', 'UR', 'R', 'L', 'UL', 'C', 'closed', 'down', 'closed'];
 
 const SETTLE_MS = 700;
 const RECORD_MS = 1500;
@@ -16,6 +16,7 @@ const RECORD_MS = 1500;
 export function stepInstruction(step: CalStep): string {
   if (step === 'C') return '画面の中央を見てください';
   if (step === 'closed') return '目を閉じてください。音が鳴ったら開けてください';
+  if (step === 'down') return '下を見てください';
   return `${DIR_NAME_JA[step]}を見てください`;
 }
 
@@ -31,7 +32,7 @@ export interface CalProgress {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * 中央・8方向・目を閉じた状態を順に音声で案内し、サンプルを集める。
+ * 中央・上と左右の5方向・目を閉じた状態（下を見た状態）を順に音声で案内し、サンプルを集める。
  * 画面を見られない方向もあるので、案内は読み上げと効果音が主。
  */
 export class CalibrationRun {
@@ -56,7 +57,7 @@ export class CalibrationRun {
       this.missed++;
       return;
     }
-    this.samples[this.recording].push([...f.feature]);
+    this.samples[this.recording === 'down' ? 'closed' : this.recording].push([...f.feature]);
   }
 
   abort() {

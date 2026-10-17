@@ -16,7 +16,7 @@ export type Feature = number[];
 export const F_BLINK = 4;
 
 export interface Calibration {
-  version: 2;
+  version: 3;
   createdAt: number;
   /** クラスごとの代表値（中央値） */
   means: Record<GazeClass, Feature>;
@@ -70,9 +70,9 @@ export function classifyDefault(f: Feature, threshold = 0.25): ClassifyResult {
   const x = f[0];
   const y = f[1];
   if (Math.hypot(x, y) < threshold) return { cls: 'C', distances: {} };
-  // -4〜4（-180°〜180°を45°刻み、0 = 右、2 = 上）
+  // -4〜4（-180°〜180°を45°刻み、0 = 右、2 = 上）。下方向は「閉じる」と同じ扱い
   const sector = Math.round(Math.atan2(y, x) / (Math.PI / 4));
-  const SECTORS: GazeClass[] = ['L', 'DL', 'D', 'DR', 'R', 'UR', 'U', 'UL', 'L'];
+  const SECTORS: GazeClass[] = ['L', 'closed', 'closed', 'closed', 'R', 'UR', 'U', 'UL', 'L'];
   return { cls: SECTORS[sector + 4], distances: {} };
 }
 
@@ -123,7 +123,7 @@ export function buildCalibration(samples: Record<GazeClass, Feature[]>): Calibra
   }
 
   const cal: Calibration = {
-    version: 2,
+    version: 3,
     createdAt: Date.now(),
     means,
     variance,
@@ -137,14 +137,15 @@ export function buildCalibration(samples: Record<GazeClass, Feature[]>): Calibra
   return cal;
 }
 
-const KEY = 'eyeboard.calibration.v2';
+// 分類するクラスが変わったので、古いキャリブレーションは使わない
+const KEY = 'eyeboard.calibration.v3';
 
 export function loadCalibration(): Calibration | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const cal = JSON.parse(raw) as Calibration;
-    return cal.version === 2 ? cal : null;
+    return cal.version === 3 ? cal : null;
   } catch {
     return null;
   }

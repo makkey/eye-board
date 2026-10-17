@@ -10,7 +10,7 @@ import { LONG_ROW_BY_DIR, ROWS, ROW_BY_DIR, flowerIndex, itemLabel, itemSpeech }
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './settings';
 import { Tracker } from './tracker';
 import type { TrackerFrame } from './tracker';
-import { ALL_CLASSES, ALL_DIRS, BACK_DIRS, DIR_ARROW, DIR_NAME_JA } from './types';
+import { ALL_CLASSES, ALL_DIRS, DIR_ARROW, DIR_NAME_JA } from './types';
 import type { Dir, GazeClass, Item, Row, Settings } from './types';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -52,10 +52,6 @@ const engine = new InputEngine(settings, {
     feedback.play('tick');
     void feedback.say(itemSpeech(item));
   },
-  backCandidate() {
-    feedback.play('tick');
-    void feedback.say('もどる');
-  },
   commit(item) {
     feedback.play('commit');
     if (item !== spokenItem) void feedback.say(itemSpeech(item));
@@ -66,8 +62,7 @@ const engine = new InputEngine(settings, {
   cancel(reason) {
     spokenItem = spokenRow = null;
     feedback.play('cancel');
-    // 下を見て戻る時は候補の時点で「もどる」と読み上げ済み
-    if (reason !== 'back') void feedback.say(reason === 'idle' ? 'キャンセル' : 'もどる');
+    void feedback.say(reason === 'idle' ? 'キャンセル' : 'もどる');
     renderKeyboard();
   },
 });
@@ -110,12 +105,8 @@ $('btn-clear').onclick = () => setText('');
 // ---- キーボード表示 ----
 const keyboardEl = $('keyboard');
 
-const DIR_GRID: Dir[] = ['UL', 'U', 'UR', 'L', 'C', 'R', 'DL', 'D', 'DR'];
-const LONG_KEYS: [Dir, string][] = [
-  ['DL', 'mod'],
-  ['D', 'wa'],
-  ['DR', 'punct'],
-];
+/** 画面上の並び（上段：↖ ↑ ↗、下段：← 中央 →） */
+const DIR_GRID: Dir[] = ['UL', 'U', 'UR', 'L', 'C', 'R'];
 
 function rowSub(row: Row): string {
   return row.items
@@ -135,21 +126,16 @@ function renderKeyboard() {
   keyboardEl.className = `keyboard stage-${engine.stage}`;
 
   if (engine.stage === 'row') {
-    const edit = ROWS.edit;
-    keyboardEl.append(keyEl(edit, `${DIR_ARROW.U} 2秒`, 'key wide'));
     for (const dir of DIR_GRID) {
-      const row = ROWS[ROW_BY_DIR[dir]];
-      keyboardEl.append(keyEl(row, dir === 'C' ? '目を閉じる' : DIR_ARROW[dir], 'key'));
-    }
-    for (const [dir, id] of LONG_KEYS) {
-      keyboardEl.append(keyEl(ROWS[id], `${DIR_ARROW[dir]} 2秒`, 'key long'));
+      const hint = dir === 'C' ? '目を閉じる／下' : DIR_ARROW[dir];
+      keyboardEl.append(keyEl(dir, ROWS[ROW_BY_DIR[dir]], ROWS[LONG_ROW_BY_DIR[dir]], hint));
     }
     return;
   }
 
-  // フラワー配置：左から時計回りに あ・い・う・え・お、下は「戻る」
+  // フラワー配置：左から時計回りに あ・い・う・え・お
   const row = engine.row!;
-  for (const dir of ['UL', 'U', 'UR', 'L', 'C', 'R'] as Dir[]) {
+  for (const dir of DIR_GRID) {
     const cell = document.createElement('div');
     if (dir === 'C') {
       cell.className = 'cell center';
@@ -159,33 +145,37 @@ function renderKeyboard() {
       const item = row.items[flowerIndex(dir)];
       cell.className = item ? 'cell' : 'cell empty';
       cell.id = `cell-${dir}`;
-      cell.innerHTML = `<span class="hint">${DIR_ARROW[dir]}</span><span class="main">${item ? itemLabel(item) : ''}</span>`;
+      const label = item ? itemLabel(item) : '';
+      // 「゛゜小」「⌫削除」のような長いラベルは小さめに
+      const cls = [...label].length > 2 ? 'main small' : 'main';
+      cell.innerHTML = `<span class="hint">${DIR_ARROW[dir]}</span><span class="${cls}">${label}</span>`;
     }
     keyboardEl.append(cell);
   }
   const back = document.createElement('div');
   back.className = 'cell back';
-  back.id = 'cell-back';
-  back.innerHTML = `<span class="main">↙ ↓ ↘ もどる</span><span class="sub">目を閉じても戻る</span>`;
+  back.innerHTML = `<span class="main">目を閉じる／下を見る → もどる</span>`;
   keyboardEl.append(back);
 }
 
-function keyEl(row: Row, hint: string, cls: string) {
+function keyEl(dir: Dir, row: Row, longRow: Row, hint: string) {
   const el = document.createElement('div');
-  el.className = cls;
-  el.id = `key-${row.id}`;
-  el.innerHTML = `<span class="hint">${hint}</span><span class="main">${row.label}</span><span class="sub">${rowSub(row)}</span>`;
+  el.className = 'key';
+  el.id = `key-${dir}`;
+  el.innerHTML = `<span class="hint">${hint}</span><span class="main">${row.label}</span>
+    <span class="sub">${rowSub(row)}</span><span class="long">2秒: ${longRow.label}</span>`;
   return el;
 }
 
 // ---- 視線インジケータ ----
 const gazeEl = $('gaze');
-const gazeCells = {} as Record<Dir, HTMLElement>;
-for (const dir of DIR_GRID) {
+const gazeCells = {} as Record<GazeClass, HTMLElement>;
+for (const cls of [...DIR_GRID, 'closed'] as GazeClass[]) {
   const c = document.createElement('div');
-  c.textContent = DIR_ARROW[dir];
+  c.textContent = cls === 'closed' ? '閉／下' : DIR_ARROW[cls];
+  if (cls === 'closed') c.className = 'closed';
   gazeEl.append(c);
-  gazeCells[dir] = c;
+  gazeCells[cls] = c;
 }
 
 // ---- 毎フレームの描画 ----
@@ -198,31 +188,40 @@ function updateView(t: number) {
   // ハイライト
   keyboardEl.querySelectorAll('.hover, .candidate').forEach((el) => el.classList.remove('hover', 'candidate'));
   const cand = engine.candidate;
+  keyboardEl.querySelectorAll('.long-active').forEach((el) => el.classList.remove('long-active'));
   if (engine.stage === 'row') {
-    if (cand?.kind === 'row') $(`key-${cand.row.id}`)?.classList.add('candidate');
-    else if (engine.dir !== 'C') $(`key-${ROWS[ROW_BY_DIR[engine.dir]].id}`)?.classList.add('hover');
+    const keyId = `key-${engine.dir}`;
+    if (cand?.kind === 'row') {
+      $(keyId)?.classList.add('candidate');
+      if (cand.long) $(keyId)?.classList.add('long-active');
+    } else if (engine.dir !== 'C') $(keyId)?.classList.add('hover');
   } else {
-    const cellId = (dir: Dir) => (BACK_DIRS.includes(dir) ? 'cell-back' : `cell-${dir}`);
-    if (cand?.kind === 'item') $(cellId(cand.dir))?.classList.add('candidate');
-    else if (cand?.kind === 'back') $('cell-back').classList.add('candidate');
-    else if (engine.dir !== 'C') $(cellId(engine.dir))?.classList.add('hover');
+    if (cand?.kind === 'item') $(`cell-${cand.dir}`)?.classList.add('candidate');
+    else if (engine.dir !== 'C') $(`cell-${engine.dir}`)?.classList.add('hover');
   }
 
-  for (const dir of ALL_DIRS) {
-    gazeCells[dir].classList.toggle('on', engine.dir === dir);
-    gazeCells[dir].classList.toggle('raw', lastRaw?.cls === dir && engine.dir !== dir);
+  for (const cls of [...ALL_DIRS, 'closed'] as GazeClass[]) {
+    const on = cls === 'closed' ? closedNow : engine.dir === cls && !closedNow;
+    gazeCells[cls].classList.toggle('on', on);
+    gazeCells[cls].classList.toggle('raw', lastRaw?.cls === cls && !on);
   }
-  gazeEl.classList.toggle('closed', closedNow);
   gazeEl.classList.toggle('noface', mode === 'camera' && !lastFrame?.faceFound);
 
   // メーター
   let fill = 0;
   let marker: number | null = null;
   if (engine.closedStart !== null) {
-    fill = engine.closeDone ? 1 : (t - engine.closedStart) / settings.closeMinMs;
+    const dur = t - engine.closedStart;
+    if (engine.stage === 'row' || engine.row?.id === ROW_BY_DIR.C) {
+      // 1段目：0.6秒で な行、2秒で 記号
+      fill = dur / settings.longMs;
+      marker = settings.closeMinMs / settings.longMs;
+    } else {
+      fill = engine.closeDone ? 1 : dur / settings.closeMinMs;
+    }
   } else if (engine.dir !== 'C') {
     const held = engine.held;
-    if (engine.stage === 'row' && LONG_ROW_BY_DIR[engine.dir]) {
+    if (engine.stage === 'row') {
       fill = held / settings.longMs;
       marker = settings.selectMs / settings.longMs;
     } else {
@@ -243,28 +242,26 @@ function updateView(t: number) {
     sub = 'カメラに顔が正面から映るようにしてください';
   } else if (engine.closedStart !== null) {
     main = '目を閉じています';
-    if (engine.closeDone) sub = engine.stage === 'char' ? `${engine.row!.speak}を選びました。目を開けてください` : 'もどりました。目を開けてください';
-    else sub = `そのまま閉じていると${engine.stage === 'row' ? ' な行' : '、もどる'}`;
+    if (!engine.closeDone) sub = `そのまま閉じていると${engine.stage === 'row' ? ' な行' : '、もどる'}`;
+    else if (engine.stage === 'row') sub = 'もどりました。目を開けてください';
+    else if (engine.row?.id === ROW_BY_DIR.C) sub = 'な行。そのまま閉じていると 記号';
+    else sub = `${engine.row!.speak}。目を開けてください`;
   } else if (engine.stage === 'row') {
     if (cand?.kind === 'row') {
       main = `${cand.row.label}`;
-      const longId = LONG_ROW_BY_DIR[engine.dir];
-      sub = '画面に視線を戻すと確定' + (longId && !cand.long ? `（見続けると ${ROWS[longId].label}）` : '');
+      sub = '画面に視線を戻すと確定' + (cand.long ? '' : `（見続けると ${ROWS[LONG_ROW_BY_DIR[engine.dir]].label}）`);
     } else {
       main = '行を選ぶ';
-      sub = '方向を見る → 戻る　／　目を閉じる → な行';
+      sub = '方向を見る → 戻る　／　目を閉じる（下を見る）→ な行';
     }
   } else {
     const row = engine.row!;
     if (cand?.kind === 'item') {
       main = `「${itemLabel(cand.item)}」`;
       sub = '画面に視線を戻すと確定';
-    } else if (cand?.kind === 'back') {
-      main = 'もどる';
-      sub = '画面に視線を戻すと1段目へ';
     } else {
       main = `${row.label} — 文字を選ぶ`;
-      sub = '← ↖ ↑ ↗ → を見て戻る　／　下か目を閉じる → もどる';
+      sub = '← ↖ ↑ ↗ → を見て戻る　／　目を閉じる（下を見る）→ もどる';
     }
   }
   statusMain.textContent = main;
@@ -300,10 +297,11 @@ tracker.onFrame = onTrackerFrame;
 function frameLoop() {
   const t = performance.now();
   if (mode === 'sim' && !calRun) {
-    const dir = simDir();
-    closedNow = simKeys.has(' ');
-    lastRaw = { cls: closedNow ? 'closed' : dir, distances: {} };
-    engine.update({ t, faceFound: true, dir, closed: closedNow });
+    const cls = simClass();
+    closedNow = cls === 'closed';
+    if (cls !== 'closed') lastOpenDir = cls;
+    lastRaw = { cls, distances: {} };
+    engine.update({ t, faceFound: true, dir: lastOpenDir, closed: closedNow });
   }
   updateView(t);
   requestAnimationFrame(frameLoop);
@@ -311,23 +309,31 @@ function frameLoop() {
 
 // ---- シミュレーション（キーボード） ----
 const simKeys = new Set<string>();
-const SIM_MAP: Record<string, Dir> = { q: 'UL', w: 'U', e: 'UR', a: 'L', d: 'R', z: 'DL', x: 'D', c: 'DR' };
+// 下方向（Z X C・↓）とスペースは、目を閉じるのと同じ扱い
+const SIM_MAP: Record<string, GazeClass> = {
+  q: 'UL',
+  w: 'U',
+  e: 'UR',
+  a: 'L',
+  d: 'R',
+  z: 'closed',
+  x: 'closed',
+  c: 'closed',
+  ' ': 'closed',
+};
 
-function simDir(): Dir {
-  for (const [k, dir] of Object.entries(SIM_MAP)) if (simKeys.has(k)) return dir;
-  const up = simKeys.has('arrowup');
-  const down = simKeys.has('arrowdown');
-  const left = simKeys.has('arrowleft');
-  const right = simKeys.has('arrowright');
-  const v = up ? 'U' : down ? 'D' : '';
-  const h = left ? 'L' : right ? 'R' : '';
+function simClass(): GazeClass {
+  for (const [k, cls] of Object.entries(SIM_MAP)) if (simKeys.has(k)) return cls;
+  if (simKeys.has('arrowdown')) return 'closed';
+  const v = simKeys.has('arrowup') ? 'U' : '';
+  const h = simKeys.has('arrowleft') ? 'L' : simKeys.has('arrowright') ? 'R' : '';
   return ((v + h) || 'C') as Dir;
 }
 
 window.addEventListener('keydown', (e) => {
   if (mode !== 'sim' || e.target instanceof HTMLInputElement) return;
   const k = e.key.toLowerCase();
-  if (k in SIM_MAP || k === ' ' || k.startsWith('arrow')) {
+  if (k in SIM_MAP || k.startsWith('arrow')) {
     simKeys.add(k);
     e.preventDefault();
   }
@@ -439,7 +445,7 @@ function trackerDiagnostics(): string {
 }
 
 function showCalProgress(p: CalProgress) {
-  $('calib-arrow').textContent = p.step === 'closed' ? '😌' : DIR_ARROW[p.step];
+  $('calib-arrow').textContent = p.step === 'closed' ? '😌' : p.step === 'down' ? '↓' : DIR_ARROW[p.step];
   $('calib-text').textContent = stepInstruction(p.step);
   $('calib-fill').style.width = `${p.phase === 'record' ? p.progress * 100 : 0}%`;
   $('calib-count').textContent = `${p.index + 1} / ${p.total}` + (p.phase === 'record' ? '　記録中…' : '');

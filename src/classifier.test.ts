@@ -9,22 +9,16 @@ const VEC: Record<GazeClass, [number, number]> = {
   U: [0, 1],
   UR: [0.7, 0.7],
   R: [1, 0],
-  DR: [0.7, -0.7],
-  D: [0, -0.6],
-  DL: [-0.7, -0.7],
   L: [-1, 0],
   UL: [-0.7, 0.7],
-  // 目を閉じると blendshape は「下を見ている」に近い値になる
-  closed: [0, -0.5],
+  // 目を閉じる（下を見る）と blendshape は「下」寄りになる
+  closed: [0, -0.7],
 };
 
-/** [blink, 目の開き]：下を見るとまばたき値は閉じた時に近いが、目の開きでは区別できる */
+/** [blink, 目の開き] */
 const LID: Record<GazeClass, [number, number]> = {
   ...(Object.fromEntries(ALL_DIRS.map((d) => [d, [0.1, 0.3]])) as Record<GazeClass, [number, number]>),
-  DL: [0.4, 0.2],
-  D: [0.45, 0.18],
-  DR: [0.4, 0.2],
-  closed: [0.55, 0.05],
+  closed: [0.7, 0.05],
 };
 
 const feat = (c: GazeClass, scale = 1): Feature => {
@@ -52,20 +46,15 @@ describe('classify', () => {
     for (const c of ALL_CLASSES) expect(classify(feat(c), cal, opt).cls).toBe(c);
   });
 
-  it('下を見るのと目を閉じるのを区別する', () => {
-    expect(cal.quality.D).toBeGreaterThan(0.9);
-    expect(cal.quality.closed).toBeGreaterThan(0.9);
-  });
-
-  it('「下」から「閉じる」へはヒステリシスなしで移る', () => {
-    // 下と閉じるの中間よりわずかに閉じる寄り（ヒステリシスがあれば「下」に留まる位置）
-    const mid = feat('D').map((v, i) => v + (feat('closed')[i] - v) * 0.52);
-    expect(classify(mid, cal, { ...opt, prev: 'D' }).cls).toBe('closed');
+  it('「中央」から「閉じる」へはヒステリシスなしで移る', () => {
+    // 中央と閉じるの中間よりわずかに閉じる寄り（ヒステリシスがあれば「中央」に留まる位置）
+    const mid = feat('C').map((v, i) => v + (feat('closed')[i] - v) * 0.52);
+    expect(classify(mid, cal, { ...opt, prev: 'C' }).cls).toBe('closed');
   });
 
   it('closedBias を小さくすると閉じていると判定されやすい', () => {
-    const mid = feat('D').map((v, i) => v + (feat('closed')[i] - v) * 0.45);
-    expect(classify(mid, cal, opt).cls).toBe('D');
+    const mid = feat('C').map((v, i) => v + (feat('closed')[i] - v) * 0.45);
+    expect(classify(mid, cal, opt).cls).toBe('C');
     expect(classify(mid, cal, { ...opt, closedBias: 0.5 }).cls).toBe('closed');
   });
 
@@ -84,11 +73,12 @@ describe('classifyDefault', () => {
   it('小さい値は中央', () => {
     expect(classifyDefault(f(0.05, 0.1)).cls).toBe('C');
   });
-  it('角度で8方向', () => {
+  it('角度で方向を決め、下方向は「閉じる」', () => {
     expect(classifyDefault(f(0, 0.5)).cls).toBe('U');
-    expect(classifyDefault(f(0.4, -0.4)).cls).toBe('DR');
     expect(classifyDefault(f(-0.5, 0)).cls).toBe('L');
     expect(classifyDefault(f(-0.4, 0.4)).cls).toBe('UL');
+    expect(classifyDefault(f(0.4, -0.4)).cls).toBe('closed');
+    expect(classifyDefault(f(0, -0.5)).cls).toBe('closed');
   });
   it('まばたき値が高ければ閉じている', () => {
     expect(classifyDefault(f(0, -0.5, 0.8)).cls).toBe('closed');

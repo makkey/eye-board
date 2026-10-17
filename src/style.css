@@ -162,9 +162,11 @@ button[aria-pressed='true'] {
 .gaze > div.raw {
   border-color: var(--accent);
 }
-.gaze.closed::after,
+.gaze > div.closed {
+  grid-column: 1 / -1;
+  font-size: 0.7rem;
+}
 .gaze.noface::after {
-  content: '閉';
   position: absolute;
   inset: 0;
   display: grid;
@@ -227,23 +229,10 @@ button[aria-pressed='true'] {
   border: 2px solid var(--line);
   transition: background-color 0.1s, border-color 0.1s;
 }
-.key.wide {
-  grid-column: 1 / -1;
-  min-height: 44px;
-  padding: 4px;
-  grid-auto-flow: column;
-  gap: 12px;
-}
-.key.long {
-  border-style: dashed;
-}
 .key .main,
 .cell .main {
   font-size: clamp(1.6rem, 7vw, 2.4rem);
   line-height: 1.1;
-}
-.key.wide .main {
-  font-size: 1.2rem;
 }
 .key .sub {
   font-size: 0.8rem;
@@ -258,8 +247,21 @@ button[aria-pressed='true'] {
   font-size: 0.75rem;
   color: var(--muted);
 }
-.key.wide .hint {
-  position: static;
+.key .long {
+  margin-top: 2px;
+  font-size: 0.8rem;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+}
+.key.long-active .long {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.key.long-active .main {
+  opacity: 0.4;
 }
 .cell.empty {
   background: transparent;
@@ -288,6 +290,9 @@ button[aria-pressed='true'] {
 }
 .stage-char .cell:not(.empty, .back, .center) .main {
   font-size: clamp(2.2rem, 10vw, 3.4rem);
+}
+.stage-char .cell:not(.empty, .back, .center) .main.small {
+  font-size: clamp(1.2rem, 5vw, 1.6rem);
 }
 .hover {
   background: var(--hover);
