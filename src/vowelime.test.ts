@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { atSentenceStart, convertPhrase, headsMatch } from './vowelime';
+import { atSentenceStart, convertPhrase, headsMatch, slotPrompt } from './vowelime';
 import type { Generate } from './vowelime';
 
 const reply = (...cands: [string, string][]) => JSON.stringify({ candidates: cands.map(([reading, text]) => ({ reading, vowels: '', text })) });
@@ -106,6 +106,15 @@ describe('atSentenceStart', () => {
 });
 
 describe('最初の1文字', () => {
+  it('区切りごとに拍を並べ、拍の数を書く', () => {
+    const p = slotPrompt('', ['ああああお', 'あえあい'], ['な', null]);
+    expect(p).toContain('ここまでの文: （文頭）');
+    expect(p).toContain('1つ目の区切り（5拍）: な ＊あ ＊あ ＊あ ＊お');
+    expect(p).toContain('2つ目の区切り（4拍）: ＊あ ＊え ＊あ ＊い');
+    expect(p).toContain('母音列（確かめ用）: ああああお あえあい');
+    expect(slotPrompt('昨日は', ['あんいえ'], ['か'])).toContain('文節（4拍）: か ん ＊い ＊え');
+  });
+
   it('行のヒントを送り、その行で始まらない候補は捨てる', async () => {
     let sent = '';
     const gen: Generate = async (_s, _sc, user) => {
@@ -113,7 +122,7 @@ describe('最初の1文字', () => {
       return reply(['またたまごが', 'また卵が'], ['なまたまごが', '生卵が'], ['ただたまごが', 'ただ卵が']);
     };
     expect(await convertPhrase('', 'ああああおあ', gen, 1, [], ['な'])).toEqual(['生卵が']);
-    expect(sent).toContain('「な」の行');
+    expect(sent).toContain('文節（6拍）: な ＊あ ＊あ ＊あ ＊お ＊あ');
   });
 
   it('区切りごとに確かめる（濁点の違いは問わない）', () => {

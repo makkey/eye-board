@@ -44,6 +44,28 @@ export interface ConvertInfo {
 }
 
 /**
+ * 最初の1文字がある時の問い合わせ。母音列とヒントを別々に書くと拍を数え違えやすい（「なあああお」に 4拍の「ななめの」を返す）ので、
+ * 区切りごとに拍を1つずつ並べ、拍の数も書く。「な」はその音、「＊あ」は あ段のどれか
+ */
+export function slotPrompt(context: string, segments: string[], heads: (string | null)[]): string {
+  const lines = segments.map((seg, i) => {
+    const morae = [...seg].map((v, j) => (j === 0 && heads[i] ? heads[i]! : v === 'ん' ? 'ん' : `＊${v}`));
+    const name = segments.length > 1 ? `${i + 1}つ目の区切り` : '文節';
+    return `${name}（${morae.length}拍）: ${morae.join(' ')}`;
+  });
+  const what =
+    segments.length > 1
+      ? '次の区切りの並びに当てはまる続き（全部をまとめて1つの続きとして候補にしてください）'
+      : '次の拍の並びに当てはまる、次の文節';
+  return [
+    `ここまでの文: ${context || '（文頭）'}`,
+    `${what}。「な」のようなかなは、その音そのもの（濁点・半濁点の有無や、きゃ・しょ のような小さい字が付くかは問わない。な なら な行）。「＊あ」は あ段の音ならどれでもよく（あ・か・が・さ・ざ・た・だ・な・は・ば・ぱ・ま・や・ら・わ、きゃ のような拗音も）、「＊い」「＊う」「＊え」「＊お」も同じ。「ん」は ん。拍の数を必ず合わせてください。`,
+    ...lines,
+    `母音列（確かめ用）: ${segments.join(' ')}`,
+  ].join('\n');
+}
+
+/**
  * 母音の並び（1文節、または空白で区切った複数の文節）を変換して、表記の候補を最大 TOP_N 個返す。
  * runs 回同時に聞いて順位を合算する。exclude（もう見せた候補）は除いて、別の候補を探させる。
  * heads は区切りごとの最初の拍のかな（利用者が12キーで入れたもの。無ければ null）。
@@ -65,14 +87,11 @@ export async function convertPhrase(
   vowels = vowels.trim().replace(/ +/g, ' ');
   const multi = vowels.includes(' ');
   const prompt = multi ? PROMPTS.v4 : PROMPTS.v2;
-  let user = userPrompt(context.slice(-CONTEXT_CHARS), vowels);
   const segments = vowels.split(' ');
-  const hints = heads.flatMap((h, i) =>
-    h ? [`${segments.length > 1 ? `${i + 1}つ目の区切り` : 'この文節'}は「${h}」の行（${rowFamily(h)}行）の音で始まる`] : [],
-  );
-  if (hints.length) {
-    user += `\n最初の音のヒント（濁点・半濁点の有無や、きゃ・しょ のような小さい字が付くかは問わない）: ${hints.join('／')}`;
-  }
+  // 最初の1文字があれば拍を並べた形で、無ければラボで測った形で聞く
+  let user = heads.some(Boolean)
+    ? slotPrompt(context.slice(-CONTEXT_CHARS), segments, heads)
+    : userPrompt(context.slice(-CONTEXT_CHARS), vowels);
   if (exclude.length) user += `\n次の候補は違いました。これらとは別の候補を挙げてください：${exclude.join('、')}`;
   if (note) user += `\n${note}`;
   const settled = await Promise.allSettled(
