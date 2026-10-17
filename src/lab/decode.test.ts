@@ -73,6 +73,11 @@ describe('mergeRuns', () => {
     expect(m.map((c) => c.reading)).toEqual(['さむい', 'あつい', 'かゆい']);
   });
 
+  it('何回かで1位になった候補は、毎回2位に出る候補より上', () => {
+    const m = mergeRuns([run('さむい', 'かゆい'), run('さむい', 'かゆい'), run('あつい', 'かゆい')], true);
+    expect(m[0].reading).toBe('さむい');
+  });
+
   it('母音が合わない候補は点が高くても後ろ', () => {
     const m = mergeRuns([run('さむいです', 'あつい'), run('さむいです', 'あつい')], true);
     expect(m.map((c) => c.reading)).toEqual(['あつい', 'さむいです']);

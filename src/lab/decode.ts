@@ -140,7 +140,8 @@ export function judge(raw: string, inputVowels: string, goldReading: string, gol
 
 /**
  * 同じ問いを何回か聞いた結果を1つの順位にまとめる（返答は毎回少しずつ違うため）。
- * 読みが同じ候補は1つにまとめ、各回の順位に応じた点（1位 10点、2位 9点…）の合計で並べる。
+ * 読みが同じ候補は1つにまとめ、各回の順位に応じた点（1位 1点、2位 1/2点、3位 1/3点…）の合計で並べる。
+ * 下位まで均等に点を配ると、どの回でも中位に出る候補が、何回かで1位になった候補を追い越してしまうため、上位を重く見る。
  * validFirst の時は母音が合う候補を先に置く。
  */
 export function mergeRuns(runs: Candidate[][], validFirst: boolean): Candidate[] {
@@ -151,8 +152,9 @@ export function mergeRuns(runs: Candidate[][], validFirst: boolean): Candidate[]
     run.forEach((c, i) => {
       const k = compact(c.reading) || compact(c.text);
       const m = merged.get(k);
-      if (m) m.score += Math.max(1, 10 - i);
-      else merged.set(k, { c, score: Math.max(1, 10 - i), first: order++ });
+      const point = 1 / (i + 1);
+      if (m) m.score += point;
+      else merged.set(k, { c, score: point, first: order++ });
     });
   }
   return [...merged.values()]

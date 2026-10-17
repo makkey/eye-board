@@ -182,6 +182,8 @@ runsSelect.onchange = () => store.set('runs', runsSelect.value);
 interface Answer {
   /** 全候補（何回か聞いた時は合算した順位） */
   all: Candidate[];
+  /** 最初に返ってきた1回分の候補（合算の効果を比べるため） */
+  single: Candidate[];
   /** 各回で受け取った候補の数の合計と、そのうち母音が合う数 */
   received: number;
   receivedValid: number;
@@ -209,7 +211,7 @@ async function ask(user: string, vowels: string, goldReading: string, goldText: 
   }
   if (!runs.length) throw firstError;
   const flat = runs.flat();
-  return { all: mergeRuns(runs, t.prompt.validFirst), received: flat.length, receivedValid: flat.filter((c) => c.valid).length, ms, raws };
+  return { all: mergeRuns(runs, t.prompt.validFirst), single: runs[0], received: flat.length, receivedValid: flat.filter((c) => c.valid).length, ms, raws };
 }
 
 // ---- 試し入力 ----
@@ -299,6 +301,8 @@ interface Task {
 interface TaskResult extends Task {
   /** 採点・表示に使う上位 TOP_N 個 */
   candidates: Candidate[];
+  /** 1回分だけの上位 TOP_N 個（何回か聞いた時の比較用） */
+  single?: Candidate[];
   /** 受け取った候補の数と、そのうち母音が合う数 */
   received: number;
   receivedValid: number;
@@ -406,6 +410,7 @@ async function runTasks(rs: TaskResult[], target: Target) {
         const a = await ask(r.user, r.vowels, r.goldReading, r.goldText, target);
         r.ms = a.ms;
         r.candidates = a.all.slice(0, TOP_N);
+        r.single = a.single.slice(0, TOP_N);
         r.received = a.received;
         r.receivedValid = a.receivedValid;
       } catch (e) {
@@ -449,6 +454,13 @@ function summarize(t: Target, mode: string, rs: TaskResult[]): Summary {
     const withError = new Set(rs.filter((r) => r.error).map((r) => r.sentence));
     const all = [...bySentence].filter(([i]) => !withError.has(i)).map(([, v]) => v);
     modeLabel += `（文ごと全部1位 ${pct(all.filter(Boolean).length, all.length)}）`;
+  }
+  if (t.runs > 1) {
+    // 同じ実行の中で、合算しなかった場合（1回目の返答だけ）の成績も出す
+    const n1 = ok.length || 1;
+    const top1 = ok.filter((r) => r.single?.[0]?.correct).length / n1;
+    const top5 = ok.filter((r) => r.single?.some((c) => c.correct)).length / n1;
+    modeLabel += `（1回分だけなら 1位 ${pctOf(top1)}・5位以内 ${pctOf(top5)}）`;
   }
   const effortLabel = (t.provider === 'claude' || t.provider === 'gemini') && t.effort !== 'default' ? ` / 深さ ${t.effort}` : '';
   // 割合はエラーにならなかった問いの中で数える（混雑や回数制限で精度が低く見えないように）
