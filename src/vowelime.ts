@@ -1,4 +1,4 @@
-import { PROMPTS, TOP_N, judge, mergeRuns, segmentPrompt } from './lab/decode';
+import { PROMPTS, TOP_N, judge, mergeRuns, segmentPrompt, sentencePrompt } from './lab/decode';
 import type { Candidate, JsonSchema } from './lab/decode';
 import type { AiEffort, AiProvider } from './types';
 
@@ -24,7 +24,17 @@ const CONTEXT_CHARS = 200;
 export type Generate = (system: string, schema: JsonSchema, user: string) => Promise<string>;
 
 /**
- * 母音の並び（1文節）を変換して、表記の候補を最大 TOP_N 個返す。
+ * 問い合わせ（user）の文。1文節なら前の文を文脈に「次の文節」として、
+ * 空白で区切った複数の文節ならまとめて変換させる（文頭ならラボの文単位と同じ形）
+ */
+export function userPrompt(context: string, vowels: string): string {
+  if (!vowels.includes(' ')) return segmentPrompt(context, vowels);
+  if (!context) return sentencePrompt(vowels);
+  return `ここまでの文: ${context}\n続きの母音列（空白で区切った複数の文節。次の文節だけでなく、全部をまとめて1つの続きとして候補にしてください）: ${vowels}`;
+}
+
+/**
+ * 母音の並び（1文節、または空白で区切った複数の文節）を変換して、表記の候補を最大 TOP_N 個返す。
  * runs 回同時に聞いて順位を合算する。exclude（もう見せた候補）は除いて、別の候補を探させる。
  * 母音が合う候補が1つもなければ空の配列
  */
@@ -37,7 +47,8 @@ export async function convertPhrase(
 ): Promise<string[]> {
   const prompt = PROMPTS.v2;
   const style = 'fold';
-  let user = segmentPrompt(context.slice(-CONTEXT_CHARS), vowels);
+  vowels = vowels.trim().replace(/ +/g, ' ');
+  let user = userPrompt(context.slice(-CONTEXT_CHARS), vowels);
   if (exclude.length) user += `\n次の候補は違いました。これらとは別の候補を挙げてください：${exclude.join('、')}`;
   const settled = await Promise.allSettled(
     Array.from({ length: Math.max(1, runs) }, () => generate(prompt.system(style), prompt.schema, user)),

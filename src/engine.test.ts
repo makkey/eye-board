@@ -333,6 +333,7 @@ describe('InputEngine（母音入力）', () => {
   it('↖ を2秒で ん、長押しの無い方向は見続けても母音のまま', () => {
     expect(run([['C', 300], ['UL', 2200], ['C', 300]], VOWEL_KEYMAP).log).toEqual(['ん']);
     expect(run([['C', 300], ['U', 2200], ['C', 300]], VOWEL_KEYMAP).log).toEqual(['う']);
+    expect(run([['C', 300], ['R', 2200], ['C', 300]], VOWEL_KEYMAP).log).toEqual(['区切り']);
   });
 
   it('目を閉じると変換、閉じ続けると変換を取り消して記号へ', () => {

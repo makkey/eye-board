@@ -126,9 +126,12 @@ function setText(next: string) {
   renderText();
 }
 
+/** 入力中の母音（文節の区切りは｜で見せる） */
+const vowelsView = () => vowels.replace(/ /g, '｜');
+
 /** 入力中の母音は［ ］で後ろに付けて見せる（本文・コピーには入れない） */
 function renderText() {
-  textEl.value = text + (vowels ? `［${vowels}］` : '');
+  textEl.value = text + (vowels ? `［${vowelsView()}］` : '');
   textEl.scrollTop = textEl.scrollHeight;
 }
 
@@ -172,6 +175,10 @@ function applyVowelItem(item: Item) {
   }
   if (item.kind === 'char') {
     if (VOWEL_CHARS.has(item.ch)) setVowels(vowels + item.ch);
+    else if (item.ch === ' ') {
+      // 文節の区切り。入力中の文節があって、まだ区切っていない時だけ
+      if (vowels && !vowels.endsWith(' ')) setVowels(vowels + ' ');
+    }
     else if (vowels) say(t('jv.convertFirst'));
     else setText(text + item.ch);
     return;
@@ -214,7 +221,7 @@ const WAIT_ROW: Row = { id: 'jv-wait', label: t('jv.waiting'), speak: '', items:
 
 /** more：今の母音で、まだ見せていない別の候補を聞く */
 async function startConversion(more: boolean) {
-  if (!vowels) {
+  if (!vowels.trim()) {
     say(t('jv.noVowels'));
     return;
   }
@@ -493,7 +500,7 @@ function updateView(now: number) {
       main = notice.text;
       sub = isVowelMode() ? t('jv.chooseVowelSub') : '';
     } else if (isVowelMode()) {
-      main = vowels ? t('jv.pending', { v: vowels }) : t('jv.chooseVowel');
+      main = vowels ? t('jv.pending', { v: vowelsView() }) : t('jv.chooseVowel');
       sub = t('jv.chooseVowelSub');
     } else {
       main = t('st.chooseRow');

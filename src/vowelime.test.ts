@@ -69,4 +69,17 @@ describe('convertPhrase', () => {
     expect(sent).toContain('別の候補');
     expect(sent).toContain('分かったのは、かかったのは');
   });
+
+  it('区切った複数の文節はまとめて変換する（文頭は文単位の形、途中は続きとして）', async () => {
+    const sent: string[] = [];
+    const gen: Generate = async (_s, _sc, user) => {
+      sent.push(user);
+      return reply(['なまたまごが たべたい', '生卵が 食べたい'], ['なまたまごが', '生卵が']);
+    };
+    expect(await convertPhrase('', 'ああああおあ あえあい ', gen)).toEqual(['生卵が食べたい']);
+    expect(sent[0]).toBe('母音列: ああああおあ あえあい');
+    await convertPhrase('今日は', 'ああああおあ あえあい', gen);
+    expect(sent[1]).toContain('ここまでの文: 今日は');
+    expect(sent[1]).toContain('全部をまとめて');
+  });
 });

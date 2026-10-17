@@ -30,6 +30,7 @@ const JA = {
 <ol>
   <li>← あ・↖ い・↑ う・↗ え・→ お を見て戻ると1拍入ります。ん は ↖ を2秒。っ は次の音の母音、ー は前の音の母音で入れます（とって → お・え・え）。</li>
   <li>1文節（「昨日は」など）入れたら<b>目を閉じる</b>と変換。候補が ← ↖ ↑ ↗ → に並ぶので、見て戻ると確定します。どれも違う時は<b>目を閉じる</b>と、まだ出ていない別の候補を聞き直します。<b>2秒閉じ続ける</b>と入力にもどります（入れた母音は残ります）。</li>
+  <li>→ を2秒で<b>文節の区切り</b>。区切って次の文節も入れてから変換すると、まとめて変換します（「生卵が 食べたい」のように、後ろの文節が手がかりになって文頭の言葉が当たりやすくなります）。</li>
   <li>← を2秒で編集（続けて ← で1拍削除）、目を閉じ続けると記号（、。？！改行）。</li>
   <li>設定で AI の会社と API キーを入れて使います（キーはこのブラウザだけに保存）。</li>
 </ol>
@@ -135,7 +136,7 @@ const JA = {
   'set.aiEffort.default': 'モデルの既定',
   'set.aiRuns': '同時に聞く回数（多いほど安定・料金は回数倍）',
   'jv.chooseVowel': '母音を入力',
-  'jv.chooseVowelSub': '← あ ↖ い ↑ う ↗ え → お　／　目を閉じる → 変換',
+  'jv.chooseVowelSub': '← あ ↖ い ↑ う ↗ え → お　／　→ 2秒で文節の区切り　／　目を閉じる → 変換',
   'jv.pending': '入力中：{v}',
   'jv.waiting': '変換中…',
   'jv.waitingSub': '目を閉じる（下を見る）→ やめる',
@@ -285,7 +286,7 @@ const EN: Record<TextKey, string> = {
   'set.aiEffort.default': 'Model default',
   'set.aiRuns': 'Parallel requests (steadier, costs more)',
   'jv.chooseVowel': 'Enter vowels',
-  'jv.chooseVowelSub': '← a ↖ i ↑ u ↗ e → o · Close eyes → convert',
+  'jv.chooseVowelSub': '← a ↖ i ↑ u ↗ e → o · Hold → 2s for a phrase break · Close eyes → convert',
   'jv.pending': 'Typing: {v}',
   'jv.waiting': 'Converting…',
   'jv.waitingSub': 'Close eyes (look down) → stop',
