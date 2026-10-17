@@ -40,11 +40,13 @@ export type Action =
   | 'undo'
   | 'speak'
   | 'convert' // 母音入力：ここまでの母音を1文節として AI に変換させる
-  | 'more'; // 母音入力：まだ出ていない別の候補を AI に聞く
+  | 'more' // 母音入力：まだ出ていない別の候補を AI に聞く
+  | 'partial' // 母音入力：変換候補のうち合っている文節だけを使う（ref = 候補の番号）
+  | 'pickPart'; // 母音入力：合っている文節を選ぶ（ref = 文節の番号）
 
 export type Item =
   | { kind: 'char'; ch: string; speak?: string; label?: string }
-  | { kind: 'action'; action: Action; label: string; speak: string };
+  | { kind: 'action'; action: Action; label: string; speak: string; ref?: number };
 
 export interface Row {
   id: string;
@@ -56,6 +58,8 @@ export interface Row {
   items: (Item | null)[];
   /** 2段目に入らず、確定した時点でこの1つを入力する（母音入力の「あ」など） */
   direct?: Item;
+  /** 2段目で longMs 見続けた時に切り替わるもの（items と同じ並び。無ければ切り替わらない） */
+  longItems?: (Item | null)[];
   /** 何もしなくても1段目へ戻らない（変換候補を読んで選ぶ間など） */
   noIdle?: boolean;
   /**

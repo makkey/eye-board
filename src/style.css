@@ -265,7 +265,8 @@ button[aria-pressed='true'] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.key .long {
+.key .long,
+.cell .long {
   margin-top: 2px;
   font-size: 0.75rem;
   padding: 0 6px;
@@ -274,12 +275,14 @@ button[aria-pressed='true'] {
   color: var(--muted);
   white-space: nowrap;
 }
-.key.long-active .long {
+.key.long-active .long,
+.cell.long-active .long {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
 }
-.key.long-active .main {
+.key.long-active .main,
+.cell.long-active .main {
   opacity: 0.4;
 }
 .cell.empty {

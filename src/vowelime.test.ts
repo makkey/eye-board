@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { atSentenceStart, convertPhrase, headsMatch, slotPrompt } from './vowelime';
+import { atSentenceStart, convertPhrase as convertFull, headsMatch, slotPrompt, splitParts } from './vowelime';
+
+const convertPhrase = async (...args: Parameters<typeof convertFull>) => (await convertFull(...args)).map((c) => c.text);
 import type { Generate } from './vowelime';
 
 const reply = (...cands: [string, string][]) => JSON.stringify({ candidates: cands.map(([reading, text]) => ({ reading, vowels: '', text })) });
@@ -131,5 +133,31 @@ describe('最初の1文字', () => {
     expect(headsMatch('なまたまごが あえあい', ['ああああおあ', 'あえあい'], ['な', 'た'])).toBe(false);
     expect(headsMatch('きょうは', ['おうあ'], ['か'])).toBe(true);
     expect(headsMatch('なんでも', ['あんえお'], [null])).toBe(true);
+  });
+});
+
+describe('一部を使う', () => {
+  it('候補を区切りごとに分ける（表記の空白が合わなければ読みで）', () => {
+    expect(splitParts('明日には 言います', 'あしたには いいます', ['あいあいあ', 'いいあう'])).toEqual([
+      { text: '明日には', reading: 'あしたには' },
+      { text: '言います', reading: 'いいます' },
+    ]);
+    expect(splitParts('明日には言います', 'あしたにはいいます', ['あいあいあ', 'いいあう'])).toEqual([
+      { text: 'あしたには', reading: 'あしたには' },
+      { text: 'いいます', reading: 'いいます' },
+    ]);
+  });
+
+  it('固定した区切りを伝え、そこが違う候補は捨てる', async () => {
+    let sent = '';
+    const gen: Generate = async (_s, _sc, user) => {
+      sent = user;
+      return reply(['あしたには いきます', '明日には 行きます'], ['あしたには いいます', '明日には 言います']);
+    };
+    const got = await convertFull('', 'あいあいあ いいあう', gen, 1, [], [], undefined, '', [
+      { index: 1, text: '言います', reading: 'いいます' },
+    ]);
+    expect(got.map((c) => c.text)).toEqual(['明日には言います']);
+    expect(sent).toContain('2つ目の区切り＝「言います」（いいます）');
   });
 });

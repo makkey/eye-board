@@ -30,7 +30,7 @@ const JA = {
 <ol>
   <li>文頭の<b>最初の1文字だけ</b>は、12キーと同じく行 → 文字で入れます（「生卵」なら な）。濁点や小さい字は付けなくて構いません（か を選べば が・きょ も候補になります）。設定で「すべての文節」「しない」にも変えられます。</li>
   <li>← あ・↖ い・↑ う・↗ え・→ お を見て戻ると1拍入ります。ん は ↖ を2秒。っ は次の音の母音、ー は前の音の母音で入れます（とって → お・え・え）。</li>
-  <li>1文節（「昨日は」など）入れたら<b>目を閉じる</b>と変換。候補が ← ↖ ↑ ↗ → に並ぶので、見て戻ると確定します。どれも違う時は<b>目を閉じる</b>と、まだ出ていない別の候補を聞き直します（聞き直しは考える深さを1段上げるので、少し時間がかかります）。<b>2秒閉じ続ける</b>と入力にもどります（入れた母音は残ります）。</li>
+  <li>1文節（「昨日は」など）入れたら<b>目を閉じる</b>と変換。候補が ← ↖ ↑ ↗ → に並ぶので、見て戻ると確定します。一部だけ合っている時は、その候補を<b>2秒見続ける</b>と文節が並ぶので、合っている文節を選びます（先頭の文節なら確定して残りを変換し直し、途中の文節ならそこを固定して変換し直します）。どれも違う時は<b>目を閉じる</b>と、まだ出ていない別の候補を聞き直します（聞き直しは考える深さを1段上げるので、少し時間がかかります）。<b>2秒閉じ続ける</b>と入力にもどります（入れた母音は残ります）。</li>
   <li><b>区切りは文節ごと</b>：「ね」を挟んで自然に切れるところ（助詞の後ろ）で区切ります。例：昨日は｜楽しかったね｜ありがとう、お水を｜ください。1つの区切りに2つの文節を入れないでください。思い通りに出ない時は、単語の切れ目や助詞の前でも区切れます（なま｜たまご｜が｜たべたい）。区切りが細かいほど、AI の当て先が絞られます。</li>
   <li>→ を2秒で<b>文節の区切り</b>。区切って次の文節も入れてから変換すると、まとめて変換します（「生卵が 食べたい」のように、後ろの文節が手がかりになって文頭の言葉が当たりやすくなります）。</li>
   <li>← を2秒で編集（続けて ← で1拍削除）、目を閉じ続けると記号（、。？！改行）。</li>
@@ -151,6 +151,12 @@ const JA = {
   'jv.choose': '候補を選ぶ',
   'jv.chooseSub': '← ↖ ↑ ↗ → を見て戻る　／　目を閉じる（下を見る）→ 別の候補（2秒で入力にもどる）',
   'jv.more': '別の候補',
+  'jv.partial': '一部を使う',
+  'jv.partLabel': '合っている文節',
+  'jv.choosePart': '合っている文節を選ぶ',
+  'jv.choosePartSub': '← ↖ ↑ ↗ → を見て戻る（先頭なら確定して続きを変換、途中なら固定して変換し直す）　／　目を閉じる → 候補にもどる',
+  'jv.choosePartSay': '合っている文節を選んでください',
+  'jv.backToCands': '候補にもどる',
   'jv.noMore': 'ほかの候補が見つかりませんでした',
   'jv.keepClosedMore': 'そのまま閉じていると 別の候補（2秒で入力にもどる）',
   'jv.candidates': '候補',
@@ -158,7 +164,7 @@ const JA = {
   'jv.noVowels': '母音が入力されていません',
   'jv.noKey': 'API キーが設定されていません。設定から入力してください',
   'jv.noCandidates': '候補が見つかりませんでした',
-  'jv.noCandidatesDetail': '候補なし：AI の候補 {n} 件は、どれも母音か最初の音が合いませんでした。例：{ex}',
+  'jv.noCandidatesDetail': '候補なし：AI の候補 {n} 件は、どれも母音・最初の音・選んだ文節のどれかが合いませんでした。例：{ex}',
   'jv.error': '変換できませんでした（{msg}）',
   'jv.convertFirst': '先に変換してください',
   'jv.cancelled': '変換をやめました',
@@ -308,6 +314,12 @@ const EN: Record<TextKey, string> = {
   'jv.choose': 'Choose a candidate',
   'jv.chooseSub': 'Look ← ↖ ↑ ↗ →, then back · Close eyes (look down) → more candidates (2s: back to input)',
   'jv.more': 'More',
+  'jv.partial': 'Use part',
+  'jv.partLabel': 'Correct part',
+  'jv.choosePart': 'Choose the correct phrase',
+  'jv.choosePartSub': 'Look ← ↖ ↑ ↗ →, then back (first: confirm and convert the rest; later: keep it and reconvert) · Close eyes → back to candidates',
+  'jv.choosePartSay': 'Choose the correct phrase',
+  'jv.backToCands': 'Back to candidates',
   'jv.noMore': 'No other candidates found',
   'jv.keepClosedMore': 'Keep closed for more candidates (2s: back to input)',
   'jv.candidates': 'Candidates',
@@ -315,7 +327,7 @@ const EN: Record<TextKey, string> = {
   'jv.noVowels': 'No vowels entered',
   'jv.noKey': 'No API key. Enter one in Settings',
   'jv.noCandidates': 'No candidates found',
-  'jv.noCandidatesDetail': 'No candidates: none of the AI’s {n} candidates matched the vowels or first sound. e.g. {ex}',
+  'jv.noCandidatesDetail': 'No candidates: none of the AI’s {n} candidates matched the vowels, first sound and kept phrases. e.g. {ex}',
   'jv.error': 'Could not convert ({msg})',
   'jv.convertFirst': 'Convert first',
   'jv.cancelled': 'Conversion stopped',

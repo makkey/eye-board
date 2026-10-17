@@ -415,3 +415,30 @@ describe('InputEngine（2段目の closeItem）', () => {
     expect(engine.stage).toBe('row');
   });
 });
+
+describe('InputEngine（2段目の長押し）', () => {
+  it('longItems があれば、見続けると切り替わって確定する', () => {
+    const row: Row = {
+      id: 'cand',
+      label: '候補',
+      speak: '候補',
+      items: [{ kind: 'char', ch: '明日には言います' }, null, null, null, null],
+      longItems: [{ kind: 'action', action: 'partial', label: '一部を使う', speak: '一部', ref: 0 }, null, null, null, null],
+      noIdle: true,
+    };
+    const log: string[] = [];
+    const engine = new InputEngine(SETTINGS, { commit: (i) => log.push(itemLabel(i)) }, VOWEL_KEYMAP);
+    let t = 0;
+    const feed = (what: Dir, ms: number) => {
+      for (let i = 0; i < ms; i += 10, t += 10) engine.update({ t, faceFound: true, dir: what, closed: false });
+    };
+    feed('C', 300);
+    engine.openRow(row, t);
+    feed('L', 600);
+    feed('C', 300);
+    engine.openRow(row, t);
+    feed('L', 2200);
+    feed('C', 300);
+    expect(log).toEqual(['明日には言います', '一部を使う']);
+  });
+});

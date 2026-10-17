@@ -80,9 +80,17 @@ const SMALL_KANA = new Set([...'ぁぃぅぇぉゃゅょゎ']);
  * っ・ー・ん も1拍。拍の数は toVowels の母音の数と同じになる。変換できない文字があれば null
  */
 export function moraKana(reading: string): string[] | null {
+  return morae(reading)?.map((m) => m[0]) ?? null;
+}
+
+/** 読みを拍に分ける（「きょうは」→ きょ・う・は）。変換できない文字があれば null */
+export function morae(reading: string): string[] | null {
   const out: string[] = [];
   for (const c of toHiragana(stripPunctuation(reading)).replace(/[\s　]+/g, '')) {
-    if (SMALL_KANA.has(c) && out.length) continue;
+    if (SMALL_KANA.has(c) && out.length) {
+      out[out.length - 1] += c;
+      continue;
+    }
     if (!VOWEL[c] && !KEEP.has(c) && !SMALL[c]) return null;
     out.push(c);
   }

@@ -3,7 +3,7 @@ import type { Dir, GazeFrame, Item, Keymap, Row, Settings, SideDir } from './typ
 
 export type Candidate =
   | { kind: 'row'; row: Row; long: boolean }
-  | { kind: 'item'; dir: Dir; item: Item };
+  | { kind: 'item'; dir: Dir; item: Item; long?: boolean };
 
 export interface EngineEvents {
   /** 1段目で行が候補になった（まだ確定していない） */
@@ -11,7 +11,7 @@ export interface EngineEvents {
   /** 行が確定し、2段目（フラワー展開）に入った（目を閉じ続けて行が切り替わった時も呼ぶ） */
   rowCommit?(row: Row): void;
   /** 2段目で文字が候補になった */
-  itemCandidate?(item: Item): void;
+  itemCandidate?(item: Item, long?: boolean): void;
   /** 文字・操作が確定した */
   commit?(item: Item): void;
   /** 目を閉じて入れた1文字（英語のスペース）を、閉じ続けたので取り消す */
@@ -256,11 +256,18 @@ export class InputEngine {
       return;
     }
 
-    if (!this.row || this.candidate || held < s.selectMs) return;
-    const item = this.row.items[flowerIndex(this.dir)];
-    if (item) {
+    if (!this.row || held < s.selectMs) return;
+    const idx = flowerIndex(this.dir);
+    const item = this.row.items[idx];
+    if (!this.candidate && item) {
       this.candidate = { kind: 'item', dir: this.dir, item };
       this.events.itemCandidate?.(item);
+    }
+    // 見続けると別のもの（母音入力の「一部を使う」）に切り替わる
+    const longItem = this.row.longItems?.[idx];
+    if (longItem && held >= s.longMs && this.candidate?.kind === 'item' && !this.candidate.long) {
+      this.candidate = { kind: 'item', dir: this.dir, item: longItem, long: true };
+      this.events.itemCandidate?.(longItem, true);
     }
   }
 

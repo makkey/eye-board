@@ -1,6 +1,6 @@
 import { PROMPTS, TOP_N, judge, mergeRuns, segmentPrompt, sentencePrompt } from './lab/decode';
 import type { Candidate, JsonSchema } from './lab/decode';
-import { moraKana, rowFamily } from './lab/vowels';
+import { moraKana, morae, normalizeSpaces, rowFamily, toHiragana } from './lab/vowels';
 import type { AiEffort, AiProvider } from './types';
 
 /**
@@ -35,12 +35,51 @@ export function userPrompt(context: string, vowels: string): string {
   return `ここまでの文: ${context}\n続きの母音列（空白で区切った複数の文節。次の文節だけでなく、全部をまとめて1つの続きとして候補にしてください）: ${vowels}`;
 }
 
+/** 変換候補。parts は入力の区切りごとの表記と読み（「一部を使う」で合っている文節を選ぶため） */
+export interface Conv {
+  text: string;
+  parts: { text: string; reading: string }[];
+}
+
+/** 利用者が「合っている」と選んで固定した区切り（index は0から） */
+export interface FixedPart {
+  index: number;
+  text: string;
+  reading: string;
+}
+
+const compactKana = (s: string) => toHiragana(s).replace(/[\s　]+/g, '');
+
+/**
+ * 候補を入力の区切りごとに分ける。読みは拍の数で切り分け、表記は空白の数が区切りの数と同じならそれを使う
+ * （合わなければ読みのひらがなを表記の代わりにする）
+ */
+export function splitParts(text: string, reading: string, segments: string[]): Conv['parts'] {
+  const ms = morae(reading);
+  const total = segments.reduce((a, s) => a + [...s].length, 0);
+  let readings: string[];
+  if (ms && ms.length === total) {
+    readings = [];
+    let i = 0;
+    for (const seg of segments) {
+      const n = [...seg].length;
+      readings.push(ms.slice(i, i + n).join(''));
+      i += n;
+    }
+  } else {
+    readings = normalizeSpaces(reading).split(' ');
+  }
+  const texts = normalizeSpaces(text).split(' ');
+  const useTexts = texts.length === segments.length;
+  return readings.map((r, i) => ({ text: useTexts ? texts[i] : r, reading: r }));
+}
+
 /** 変換の途中経過（候補が無かった時に、何がはじかれたかを見せるため） */
 export interface ConvertInfo {
   /** AI が返した候補の数（全回の合計） */
   received: number;
-  /** 母音や最初の音が合わずに捨てた候補 */
-  rejected: { text: string; reading: string; reason: 'vowels' | 'head' }[];
+  /** 捨てた候補。vowels：母音が合わない、constraint：最初の音や固定した文節が合わない（確実に違う） */
+  rejected: { text: string; reading: string; reason: 'vowels' | 'constraint' }[];
 }
 
 /**
@@ -82,7 +121,9 @@ export async function convertPhrase(
   info?: ConvertInfo,
   /** 問い合わせの最後に付け足す注意（聞き直す時など） */
   note = '',
-): Promise<string[]> {
+  /** 利用者が合っていると選んだ区切り。そこが違う候補は捨てる */
+  fixed: FixedPart[] = [],
+): Promise<Conv[]> {
   const style = 'fold';
   vowels = vowels.trim().replace(/ +/g, ' ');
   const multi = vowels.includes(' ');
@@ -93,6 +134,10 @@ export async function convertPhrase(
     ? slotPrompt(context.slice(-CONTEXT_CHARS), segments, heads)
     : userPrompt(context.slice(-CONTEXT_CHARS), vowels);
   if (exclude.length) user += `\n次の候補は違いました。これらとは別の候補を挙げてください：${exclude.join('、')}`;
+  if (fixed.length) {
+    const list = fixed.map((f) => `${f.index + 1}つ目の区切り＝「${f.text}」（${f.reading}）`).join('、');
+    user += `\n次の区切りは利用者が正しいと決めたものです。必ずこのとおりにし、ほかの区切りだけを考えてください：${list}`;
+  }
   if (note) user += `\n${note}`;
   const settled = await Promise.allSettled(
     Array.from({ length: Math.max(1, runs) }, () => generate(prompt.system(style), prompt.schema, user)),
@@ -106,11 +151,13 @@ export async function convertPhrase(
     }
     try {
       const all = judge(s.value, vowels, '', '', true, style, multi);
-      const ok = all.filter((c) => c.valid && headsMatch(c.reading, segments, heads));
+      const ok = all.filter(
+        (c) => c.valid && headsMatch(c.reading, segments, heads) && fixedMatch(c.text, c.reading, segments, fixed),
+      );
       if (info) {
         info.received += all.length;
         for (const c of all) {
-          if (!ok.includes(c)) info.rejected.push({ text: c.text, reading: c.reading, reason: c.valid ? 'head' : 'vowels' });
+          if (!ok.includes(c)) info.rejected.push({ text: c.text, reading: c.reading, reason: c.valid ? 'constraint' : 'vowels' });
         }
       }
       lists.push(ok);
@@ -119,13 +166,21 @@ export async function convertPhrase(
     }
   }
   if (!lists.length) throw firstError instanceof Error ? firstError : new Error(String(firstError));
-  const texts: string[] = [];
+  const out: Conv[] = [];
   for (const c of mergeRuns(lists, true, multi)) {
     // 文節の中の区切りの空白は本文に入れない
     const text = c.text.replace(/[\s　]+/g, '');
-    if (text && !texts.includes(text) && !exclude.includes(text)) texts.push(text);
+    if (!text || out.some((o) => o.text === text) || exclude.includes(text)) continue;
+    out.push({ text, parts: splitParts(c.text, c.reading, segments) });
   }
-  return texts.slice(0, TOP_N);
+  return out.slice(0, TOP_N);
+}
+
+/** 固定した区切りの読みが、候補でも同じか */
+function fixedMatch(text: string, reading: string, segments: string[], fixed: FixedPart[]): boolean {
+  if (!fixed.length) return true;
+  const parts = splitParts(text, reading, segments);
+  return fixed.every((f) => parts[f.index] && compactKana(parts[f.index].reading) === compactKana(f.reading));
 }
 
 /** 区切りごとの最初の拍が、指定された行で始まっているか */

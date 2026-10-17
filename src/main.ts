@@ -17,7 +17,7 @@ import type { TextKey } from './i18n';
 import { ALL_CLASSES, ALL_DIRS, DIR_ARROW, FLOWER_DIRS } from './types';
 import type { AiEffort, AiProvider, Dir, GazeClass, Item, JaInput, Row, Settings, SideDir } from './types';
 import { DEFAULT_MODELS, PROVIDER_LABELS, atSentenceStart, convertPhrase, loadKey, providerGenerate, saveKey } from './vowelime';
-import type { ConvertInfo } from './vowelime';
+import type { Conv, ConvertInfo, FixedPart } from './vowelime';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -44,12 +44,16 @@ const trail: number[][] = [];
  */
 let pending: string[] = [];
 /** idle：母音を入力中、waiting：AI に問い合わせ中、choosing：候補を選んでいる */
-let conv: 'idle' | 'waiting' | 'choosing' = 'idle';
+/** partial：候補のうち合っている文節を選んでいる */
+let conv: 'idle' | 'waiting' | 'choosing' | 'partial' = 'idle';
 /** 問い合わせごとの番号（やめた・やり直した問い合わせの返事を無視するため） */
 let convToken = 0;
 /** 今の母音について、これまでに見せた候補（「別の候補」で除く）と、直近に並べた候補 */
 let shown: string[] = [];
-let lastCands: string[] = [];
+let lastCands: Conv[] = [];
+/** 「一部を使う」で選んでいる候補と、合っていると決めた区切り（母音を入れ直すと消える） */
+let partialCand: Conv | null = null;
+let fixedParts: FixedPart[] = [];
 /** しばらく案内欄に出すお知らせ（エラーなど） */
 let notice: { text: string; until: number } | null = null;
 const VOWEL_CHARS = new Set([...'あいうえおん']);
@@ -108,9 +112,9 @@ const engine = new InputEngine(settings, {
     spokenRow = null;
     renderKeyboard();
   },
-  itemCandidate(item) {
+  itemCandidate(item, long) {
     spokenItem = item;
-    feedback.play('select');
+    feedback.play(long ? 'long' : 'select');
     void feedback.say(itemSpeech(item));
   },
   commit(item) {
@@ -123,7 +127,12 @@ const engine = new InputEngine(settings, {
   cancel(reason) {
     spokenItem = spokenRow = null;
     feedback.play('cancel');
-    if (conv !== 'idle') {
+    if (conv === 'partial') {
+      // 文節を選ばずに目を閉じた：候補の一覧にもどる
+      conv = 'choosing';
+      void feedback.say(t('jv.backToCands'));
+      engine.openRow(candidateRow(lastCands, convToken), performance.now());
+    } else if (conv !== 'idle') {
       // 変換中・候補から、目を閉じて入力にもどった（入れた母音はそのまま）
       void feedback.say(t(conv === 'waiting' ? 'jv.cancelled' : 'jv.backToInput'));
       conv = 'idle';
@@ -218,11 +227,11 @@ function applyVowelItem(item: Item) {
   if (item.kind === 'char') {
     if (engine.keymap.id === HEAD_KEYMAP.id && /^[ぁ-ゖ]$/.test(item.ch)) {
       // 12キーで入れた最初の1文字。行がその文節の最初の拍の手がかりになる
-      setPending([...pending, `*${item.ch}`]);
-    } else if (VOWEL_CHARS.has(item.ch)) setPending([...pending, item.ch]);
+      editPending([...pending, `*${item.ch}`]);
+    } else if (VOWEL_CHARS.has(item.ch)) editPending([...pending, item.ch]);
     else if (item.ch === ' ') {
       // 文節の区切り。入力中の文節があって、まだ区切っていない時だけ
-      if (pending.length && pending[pending.length - 1] !== ' ') setPending([...pending, ' ']);
+      if (pending.length && pending[pending.length - 1] !== ' ') editPending([...pending, ' ']);
     } else if (pending.length) say(t('jv.convertFirst'));
     else setText(text + item.ch);
     syncKeymap();
@@ -235,14 +244,28 @@ function applyVowelItem(item: Item) {
     case 'more':
       void startConversion(true);
       return;
+    case 'partial': {
+      // 候補を見続けた：その候補の文節を並べて、合っているものを選んでもらう
+      const cand = lastCands[item.ref ?? -1];
+      if (!cand) return;
+      conv = 'partial';
+      partialCand = cand;
+      engine.openRow(partialRow(cand), performance.now());
+      void feedback.say(t('jv.choosePartSay'));
+      renderKeyboard();
+      return;
+    }
+    case 'pickPart':
+      pickPart(item.ref ?? -1);
+      return;
     case 'backspace':
       // 入力中の拍があればそれを1つ消す
-      if (pending.length) setPending(pending.slice(0, -1));
+      if (pending.length) editPending(pending.slice(0, -1));
       else setText(applyItem(text, item));
       break;
     case 'clear':
       setText('');
-      setPending([]);
+      editPending([]);
       break;
     case 'speak':
       void feedback.say(text + pendingView() || t('say.empty'), true);
@@ -255,6 +278,53 @@ function applyVowelItem(item: Item) {
       else setText(applyItem(text, item));
   }
   syncKeymap();
+}
+
+/** 利用者が拍を入れ直した：固定していた文節は合わなくなるので捨てる */
+function editPending(next: string[]) {
+  fixedParts = [];
+  setPending(next);
+}
+
+/** 入力中の拍を区切りごとに分ける（区切りの ' ' は含めない） */
+function pendingSegments(): string[][] {
+  const segs: string[][] = [[]];
+  for (const tok of pending) {
+    if (tok === ' ') segs.push([]);
+    else segs[segs.length - 1].push(tok);
+  }
+  return segs.filter((s) => s.length);
+}
+
+/**
+ * 「一部を使う」で文節 k を選んだ。先頭の文節なら確定して残りを変換し直し、
+ * それ以外なら固定して全体を変換し直す
+ */
+function pickPart(k: number) {
+  const part = partialCand?.parts[k];
+  partialCand = null;
+  conv = 'idle';
+  if (!part) return;
+  if (k === 0) {
+    const rest = pendingSegments().slice(1);
+    pending = rest.flatMap((seg, i) => (i ? [' ', ...seg] : seg));
+    fixedParts = fixedParts.filter((f) => f.index > 0).map((f) => ({ ...f, index: f.index - 1 }));
+    setText(text + part.text);
+    if (pending.length) void startConversion(false);
+    else syncKeymap();
+    return;
+  }
+  fixedParts = [...fixedParts.filter((f) => f.index !== k), { index: k, text: part.text, reading: part.reading }];
+  void startConversion(false);
+}
+
+/** 候補の文節を ← ↖ ↑ ↗ → に並べた2段目（最大5つ） */
+function partialRow(cand: Conv): Row {
+  const items = FLOWER_DIRS.map((_, k) => {
+    const p = cand.parts[k];
+    return p ? ({ kind: 'action', action: 'pickPart', label: p.text, speak: p.text, ref: k } as Item) : null;
+  });
+  return { id: `jv-part-${convToken}`, label: t('jv.partLabel'), speak: '', items, noIdle: true };
 }
 
 function say(msg: string) {
@@ -290,19 +360,19 @@ async function startConversion(more: boolean) {
     const runs = atSentenceStart(text) ? Math.max(2, settings.aiRuns) : settings.aiRuns;
     const heads = pendingHeads();
     const info: ConvertInfo = { received: 0, rejected: [] };
-    let cands = await convertPhrase(text, vowels, generate, runs, shown, heads, info);
+    let cands = await convertPhrase(text, vowels, generate, runs, shown, heads, info, '', fixedParts);
     if (token !== convToken) return;
     if (!cands.length && info.rejected.length) {
       // 返ってきた候補が全部はじかれた：理由を伝えて1回だけ聞き直す。
-      // 最初の音の行が違うものは確実に違うので除く。母音が合わないものは表記が正しくて読みだけ違うこともあるので、
+      // 最初の音の行や固定した文節が違うものは確実に違うので除く。母音が合わないものは表記が正しくて読みだけ違うこともあるので、
       // 除かずに読みを確かめてもらう
       const compactText = (s: string) => s.replace(/[\s　]+/g, '');
-      const wrongHead = [...new Set(info.rejected.filter((r) => r.reason === 'head').map((r) => compactText(r.text)))];
+      const wrongHead = [...new Set(info.rejected.filter((r) => r.reason === 'constraint').map((r) => compactText(r.text)))];
       const badReading = [...new Set(info.rejected.filter((r) => r.reason === 'vowels').map((r) => `${compactText(r.text)}（${r.reading}）`))];
       const note = badReading.length
         ? `前の答えの次の候補は、読みを規則どおり母音に直すと入力と合いませんでした。拍の数と読み方を確かめてください：${badReading.slice(0, 5).join('、')}`
         : '';
-      cands = await convertPhrase(text, vowels, generate, runs, [...shown, ...wrongHead], heads, info, note);
+      cands = await convertPhrase(text, vowels, generate, runs, [...shown, ...wrongHead], heads, info, note, fixedParts);
       if (token !== convToken) return;
     }
     if (!cands.length) {
@@ -325,7 +395,7 @@ async function startConversion(more: boolean) {
       renderKeyboard();
       return;
     }
-    shown.push(...cands);
+    shown.push(...cands.map((c) => c.text));
     lastCands = cands;
     conv = 'choosing';
     engine.openRow(candidateRow(cands, token), performance.now());
@@ -347,13 +417,20 @@ function deeper(e: AiEffort): AiEffort {
 }
 
 /** 変換候補を ← ↖ ↑ ↗ → に並べた2段目（1番目の候補が ←） */
-function candidateRow(cands: string[], token: number): Row {
-  const items = FLOWER_DIRS.map((_, i) => (cands[i] ? ({ kind: 'char', ch: cands[i] } as Item) : null));
+function candidateRow(cands: Conv[], token: number): Row {
+  const items = FLOWER_DIRS.map((_, i) => (cands[i] ? ({ kind: 'char', ch: cands[i].text } as Item) : null));
+  // 文節が2つ以上の候補は、見続けると「一部を使う」（合っている文節だけを選ぶ）
+  const longItems = FLOWER_DIRS.map((_, i) =>
+    cands[i]?.parts.length > 1
+      ? ({ kind: 'action', action: 'partial', label: t('jv.partial'), speak: t('jv.partial'), ref: i } as Item)
+      : null,
+  );
   return {
     id: `jv-cand-${token}`,
     label: t('jv.candidates'),
-    speak: t('jv.candidatesSay', { first: cands[0] }),
+    speak: t('jv.candidatesSay', { first: cands[0].text }),
     items,
+    longItems,
     noIdle: true,
     // 目を閉じると別の候補、閉じ続けると入力にもどる
     closeItem: { kind: 'action', action: 'more', label: t('jv.more'), speak: t('jv.more') },
@@ -445,7 +522,10 @@ function renderKeyboard() {
       // 「゛゜小」「⌫削除」のような長いラベルは小さめに。変換候補はさらに長いことがある
       const len = [...label].length;
       const cls = len > 4 ? 'main small cand' : len > 2 ? 'main small' : 'main';
-      cell.innerHTML = `<span class="hint">${DIR_ARROW[pos]}</span><span class="${cls}">${label}</span>`;
+      // 見続けると切り替わるもの（変換候補の「一部を使う」）
+      const longItem = row.longItems?.[flowerIndex(pos)];
+      const long = longItem ? `<span class="long">${t('key.long', { label: itemLabel(longItem) })}</span>` : '';
+      cell.innerHTML = `<span class="hint">${DIR_ARROW[pos]}</span><span class="${cls}">${label}</span>${long}`;
       keyboardEl.append(cell);
     }
   }
@@ -504,7 +584,10 @@ function updateView(now: number) {
     } else if (engine.closedStart !== null) $('key-close')?.classList.add('hover');
     else if (engine.dir !== 'C') $(keyId)?.classList.add('hover');
   } else {
-    if (cand?.kind === 'item') $(`cell-${cand.dir}`)?.classList.add('candidate');
+    if (cand?.kind === 'item') {
+      $(`cell-${cand.dir}`)?.classList.add('candidate');
+      if (cand.long) $(`cell-${cand.dir}`)?.classList.add('long-active');
+    }
     else if (engine.closedStart !== null) $('cell-close')?.classList.add('hover');
     else if (engine.dir !== 'C') $(`cell-${engine.dir}`)?.classList.add('hover');
   }
@@ -585,6 +668,9 @@ function updateView(now: number) {
   } else if (conv === 'waiting') {
     main = t('jv.waiting');
     sub = t('jv.waitingSub');
+  } else if (conv === 'partial' && cand?.kind !== 'item') {
+    main = t('jv.choosePart');
+    sub = t('jv.choosePartSub');
   } else if (conv === 'choosing' && cand?.kind !== 'item') {
     main = t('jv.choose');
     sub = t('jv.chooseSub');
